@@ -4,13 +4,21 @@ import ChatArea from '@/components/ChatArea';
 import AuthPage from '@/components/AuthPage';
 import ProfileModal from '@/components/ProfileModal';
 import NewChatModal from '@/components/NewChatModal';
+import SearchModal from '@/components/SearchModal';
+import SettingsModal from '@/components/SettingsModal';
+import BlockedContactsModal from '@/components/BlockedContactsModal';
+import ForwardModal from '@/components/ForwardModal';
+import { CallModal } from '@/components/Calls';
+import { StoryViewer } from '@/components/Stories';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { ThemeProvider } from '@/context/ThemeContext';
+import { ToastProvider, useToast } from '@/context/ToastContext';
 import { supabase } from '@/lib/supabase';
 import type { Conversation, Message, Profile } from '@/types';
 
 function ChatApp() {
   const { session, profile, loading } = useAuth();
+  const { toast } = useToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -20,20 +28,25 @@ function ChatApp() {
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
   const [showProfile, setShowProfile] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showBlocked, setShowBlocked] = useState(false);
+  const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
+  const [callState, setCallState] = useState<{ conversation: Conversation; type: 'voice' | 'video' } | null>(null);
+  const [storyUserId, setStoryUserId] = useState<string | null>(null);
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
     [conversations, activeId]
   );
 
-  // Load conversations
   const loadConversations = useCallback(async () => {
     if (!profile) return;
     setLoadingConvos(true);
     try {
       const { data: parts, error } = await supabase
         .from('conversation_participants')
-        .select('conversation_id, pinned, conversation:conversations(id, is_group, created_at)')
+        .select('conversation_id, pinned, muted, archived, favorite, is_self, conversation:conversations(id, is_group, name, avatar_url, created_by, created_at)')
         .eq('user_id', profile.id);
       if (error) throw error;
 
@@ -44,27 +57,26 @@ function ChatApp() {
         const c = (p as unknown as { conversation: Conversation }).conversation;
         const { data: cpRows } = await supabase
           .from('conversation_participants')
-          .select('user_id, pinned')
+          .select('user_id, pinned, muted, archived, favorite, is_self')
           .eq('conversation_id', c.id);
         const userIds = (cpRows ?? []).map((r) => r.user_id);
         userIds.forEach((id) => allUserIds.add(id));
 
         const { data: profRows } = await supabase
           .from('profiles')
-          .select('id, username, full_name, avatar_url, bio, last_seen, created_at')
+          .select('id, username, full_name, avatar_url, bio, phone, last_seen, created_at, is_verified, is_official')
           .in('id', userIds);
         const profs = (profRows ?? []) as Profile[];
-        const myPinned = (cpRows ?? []).find((r) => r.user_id === profile.id)?.pinned ?? false;
+        const myRow = (cpRows ?? []).find((r) => r.user_id === profile.id);
 
         const { data: lastMsgRow } = await supabase
           .from('messages')
-          .select('id, conversation_id, sender_id, text, media_url, media_type, media_name, reply_to_id, edited_at, deleted_for_everyone, created_at')
+          .select('id, conversation_id, sender_id, text, media_url, media_type, media_name, reply_to_id, edited_at, deleted_for_everyone, created_at, forwarded_from_id, duration, location_lat, location_lng, contact_name, contact_phone')
           .eq('conversation_id', c.id)
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        // Unread count: messages not sent by me and not in message_reads for me
         const { data: allConvoMsgs } = await supabase
           .from('messages')
           .select('id, sender_id')
@@ -87,16 +99,19 @@ function ChatApp() {
           participants: profs,
           last_message: lastMsgRow as Message | undefined,
           unread_count: unread,
-          pinned: myPinned,
+          pinned: myRow?.pinned ?? false,
+          muted: myRow?.muted ?? false,
+          archived: myRow?.archived ?? false,
+          favorite: myRow?.favorite ?? false,
+          is_self: myRow?.is_self ?? false,
         });
       }
 
       setConversations(convoList);
 
-      // Cache all participant profiles
       const { data: allProfs } = await supabase
         .from('profiles')
-        .select('id, username, full_name, avatar_url, bio, last_seen, created_at')
+        .select('id, username, full_name, avatar_url, bio, phone, last_seen, created_at, is_verified, is_official')
         .in('id', Array.from(allUserIds));
       const profMap: Record<string, Profile> = {};
       (allProfs ?? []).forEach((p) => { profMap[p.id] = p as Profile; });
@@ -112,20 +127,18 @@ function ChatApp() {
     if (profile) loadConversations();
   }, [profile, loadConversations]);
 
-  // Load messages for active conversation
   const loadMessages = useCallback(async () => {
     if (!activeId || !profile) return;
     setLoadingMessages(true);
     try {
       const { data, error } = await supabase
         .from('messages')
-        .select('id, conversation_id, sender_id, text, media_url, media_type, media_name, reply_to_id, edited_at, deleted_for_everyone, created_at')
+        .select('id, conversation_id, sender_id, text, media_url, media_type, media_name, reply_to_id, edited_at, deleted_for_everyone, created_at, forwarded_from_id, duration, location_lat, location_lng, contact_name, contact_phone')
         .eq('conversation_id', activeId)
         .order('created_at', { ascending: true });
       if (error) throw error;
       const msgList = (data ?? []) as Message[];
 
-      // Filter out hidden messages
       const { data: hidden } = await supabase
         .from('message_hidden')
         .select('message_id')
@@ -133,7 +146,6 @@ function ChatApp() {
       const hiddenSet = new Set((hidden ?? []).map((h) => h.message_id));
       const visible = msgList.filter((m) => !hiddenSet.has(m.id));
 
-      // Load read receipts
       const { data: reads } = await supabase
         .from('message_reads')
         .select('message_id, user_id')
@@ -143,9 +155,31 @@ function ChatApp() {
         if (!readMap[r.message_id]) readMap[r.message_id] = [];
         readMap[r.message_id].push(r.user_id);
       });
-      const withReads = visible.map((m) => ({ ...m, read_by: readMap[m.id] ?? [] }));
 
-      setMessages(withReads);
+      const { data: reactions } = await supabase
+        .from('message_reactions')
+        .select('message_id, user_id, emoji')
+        .in('message_id', visible.map((m) => m.id));
+      const reactionMap: Record<string, { emoji: string; user_id: string }[]> = {};
+      (reactions ?? []).forEach((r) => {
+        if (!reactionMap[r.message_id]) reactionMap[r.message_id] = [];
+        reactionMap[r.message_id].push({ emoji: r.emoji, user_id: r.user_id });
+      });
+
+      const { data: starred } = await supabase
+        .from('starred_messages')
+        .select('message_id')
+        .eq('user_id', profile.id);
+      const starredSet = new Set((starred ?? []).map((s) => s.message_id));
+
+      const withMeta = visible.map((m) => ({
+        ...m,
+        read_by: readMap[m.id] ?? [],
+        reactions: reactionMap[m.id] ?? [],
+        starred: starredSet.has(m.id),
+      }));
+
+      setMessages(withMeta);
     } catch (err) {
       console.error('Failed to load messages', err);
     } finally {
@@ -158,76 +192,58 @@ function ChatApp() {
     else setMessages([]);
   }, [activeId, loadMessages]);
 
-  // Real-time: new messages in active conversation
+  // Real-time: messages
   useEffect(() => {
     if (!activeId || !profile) return;
     const channel = supabase
       .channel(`messages:${activeId}`)
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` },
-        (payload) => {
-          const newMsg = payload.new as Message;
-          setMessages((prev) => {
-            if (prev.find((m) => m.id === newMsg.id)) return prev;
-            return [...prev, { ...newMsg, read_by: [] }];
-          });
-        }
-      )
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` },
-        (payload) => {
-          const updated = payload.new as Message;
-          setMessages((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
-        }
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` }, (payload) => {
+        const newMsg = payload.new as Message;
+        setMessages((prev) => {
+          if (prev.find((m) => m.id === newMsg.id)) return prev;
+          return [...prev, { ...newMsg, read_by: [], reactions: [] }];
+        });
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` }, (payload) => {
+        const updated = payload.new as Message;
+        setMessages((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reactions', filter: `message_id=in.(${messages.map(m => m.id).join(',') || '00000000-0000-0000-0000-000000000000'})` }, () => {
+        loadMessages();
+      })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
-  }, [activeId, profile]);
+  }, [activeId, profile, messages.length, loadMessages]);
 
-  // Real-time: typing status
+  // Real-time: typing
   useEffect(() => {
     if (!activeId || !profile) return;
     const channel = supabase
       .channel(`typing:${activeId}`)
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'typing_status', filter: `conversation_id=eq.${activeId}` },
-        (payload) => {
-          const row = (payload.new ?? payload.old) as { user_id: string; is_typing: boolean };
-          setTypingUserIds((prev) => {
-            if (row.is_typing) return prev.includes(row.user_id) ? prev : [...prev, row.user_id];
-            return prev.filter((id) => id !== row.user_id);
-          });
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'typing_status', filter: `conversation_id=eq.${activeId}` }, (payload) => {
+        const row = (payload.new ?? payload.old) as { user_id: string; is_typing: boolean };
+        setTypingUserIds((prev) => {
+          if (row.is_typing) return prev.includes(row.user_id) ? prev : [...prev, row.user_id];
+          return prev.filter((id) => id !== row.user_id);
+        });
+      })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [activeId, profile]);
 
-  // Real-time: conversation list updates (new messages, new conversations)
+  // Real-time: conversation list updates
   useEffect(() => {
     if (!profile) return;
     const channel = supabase
       .channel('conversations-update')
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        () => { loadConversations(); }
-      )
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages' },
-        () => { loadConversations(); }
-      )
-      .on('postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'conversation_participants', filter: `user_id=eq.${profile.id}` },
-        () => { loadConversations(); }
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => loadConversations())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'messages' }, () => loadConversations())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversation_participants', filter: `user_id=eq.${profile.id}` }, () => loadConversations())
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [profile, loadConversations]);
 
-  // Update last_seen periodically
+  // Update last_seen
   useEffect(() => {
     if (!profile) return;
     const update = () => supabase.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', profile.id);
@@ -242,8 +258,8 @@ function ChatApp() {
     if (Notification.permission === 'default') Notification.requestPermission();
   }, []);
 
-  // Send message
-  const handleSendMessage = async (payload: { text?: string; mediaUrl?: string; mediaType?: string; mediaName?: string; replyToId?: string }) => {
+  // Handlers
+  const handleSendMessage = async (payload: { text?: string; mediaUrl?: string; mediaType?: string; mediaName?: string; replyToId?: string; duration?: number; forwardedFromId?: string; locationLat?: number; locationLng?: number; contactName?: string; contactPhone?: string }) => {
     if (!profile || !activeId) return;
     const { data, error } = await supabase
       .from('messages')
@@ -255,53 +271,137 @@ function ChatApp() {
         media_type: payload.mediaType ?? null,
         media_name: payload.mediaName ?? null,
         reply_to_id: payload.replyToId ?? null,
+        forwarded_from_id: payload.forwardedFromId ?? null,
+        duration: payload.duration ?? null,
+        location_lat: payload.locationLat ?? null,
+        location_lng: payload.locationLng ?? null,
+        contact_name: payload.contactName ?? null,
+        contact_phone: payload.contactPhone ?? null,
       })
-      .select('id, conversation_id, sender_id, text, media_url, media_type, media_name, reply_to_id, edited_at, deleted_for_everyone, created_at')
+      .select('id, conversation_id, sender_id, text, media_url, media_type, media_name, reply_to_id, edited_at, deleted_for_everyone, created_at, forwarded_from_id, duration, location_lat, location_lng, contact_name, contact_phone')
       .single();
-    if (error) { console.error('Send failed', error); return; }
-    setMessages((prev) => [...prev, { ...(data as Message), read_by: [] }]);
+    if (error) { console.error('Send failed', error); toast('Failed to send message', 'error'); return; }
+    setMessages((prev) => [...prev, { ...(data as Message), read_by: [], reactions: [] }]);
   };
 
   const handleEditMessage = async (message: Message, newText: string) => {
-    const { error } = await supabase
-      .from('messages')
-      .update({ text: newText, edited_at: new Date().toISOString() })
-      .eq('id', message.id);
-    if (error) { console.error('Edit failed', error); return; }
+    const { error } = await supabase.from('messages').update({ text: newText, edited_at: new Date().toISOString() }).eq('id', message.id);
+    if (error) { toast('Edit failed', 'error'); return; }
     setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, text: newText, edited_at: new Date().toISOString() } : m)));
   };
 
   const handleDeleteForMe = async (message: Message) => {
     if (!profile) return;
     const { error } = await supabase.from('message_hidden').insert({ message_id: message.id, user_id: profile.id });
-    if (error) { console.error('Delete for me failed', error); return; }
+    if (error) { toast('Delete failed', 'error'); return; }
     setMessages((prev) => prev.filter((m) => m.id !== message.id));
+    toast('Message deleted', 'success');
   };
 
   const handleDeleteForEveryone = async (message: Message) => {
-    const { error } = await supabase
-      .from('messages')
-      .update({ deleted_for_everyone: true, text: null, media_url: null, media_type: null, media_name: null })
-      .eq('id', message.id);
-    if (error) { console.error('Delete for everyone failed', error); return; }
+    const { error } = await supabase.from('messages').update({ deleted_for_everyone: true, text: null, media_url: null, media_type: null, media_name: null }).eq('id', message.id);
+    if (error) { toast('Delete failed', 'error'); return; }
     setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, deleted_for_everyone: true, text: null, media_url: null, media_type: null, media_name: null } : m)));
+    toast('Message deleted for everyone', 'success');
   };
 
   const handleMarkRead = async (msgs: Message[]) => {
     if (!profile) return;
     const rows = msgs.map((m) => ({ message_id: m.id, user_id: profile.id }));
     if (!rows.length) return;
-    const { error } = await supabase.from('message_reads').upsert(rows, { onConflict: 'message_id,user_id' });
-    if (error) console.error('Mark read failed', error);
+    await supabase.from('message_reads').upsert(rows, { onConflict: 'message_id,user_id' });
     setMessages((prev) => prev.map((m) => msgs.find((x) => x.id === m.id) ? { ...m, read_by: [...(m.read_by ?? []), profile.id] } : m));
   };
 
   const handleSetTyping = async (isTyping: boolean) => {
     if (!profile || !activeId) return;
-    const { error } = await supabase
-      .from('typing_status')
-      .upsert({ conversation_id: activeId, user_id: profile.id, is_typing: isTyping, updated_at: new Date().toISOString() }, { onConflict: 'conversation_id,user_id' });
-    if (error) console.error('Typing update failed', error);
+    await supabase.from('typing_status').upsert({ conversation_id: activeId, user_id: profile.id, is_typing: isTyping, updated_at: new Date().toISOString() }, { onConflict: 'conversation_id,user_id' });
+  };
+
+  const handleReact = async (messageId: string, emoji: string) => {
+    if (!profile) return;
+    // Toggle reaction
+    const existing = messages.find((m) => m.id === messageId)?.reactions?.find((r) => r.user_id === profile.id);
+    if (existing) {
+      await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', profile.id);
+    } else {
+      await supabase.from('message_reactions').insert({ message_id: messageId, user_id: profile.id, emoji });
+    }
+    setMessages((prev) => prev.map((m) => {
+      if (m.id !== messageId) return m;
+      const reactions = m.reactions ?? [];
+      const filtered = reactions.filter((r) => r.user_id !== profile.id);
+      if (!existing) filtered.push({ emoji, user_id: profile.id });
+      return { ...m, reactions: filtered };
+    }));
+  };
+
+  const handleStar = async (message: Message) => {
+    if (!profile) return;
+    if (message.starred) {
+      await supabase.from('starred_messages').delete().eq('message_id', message.id).eq('user_id', profile.id);
+      setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, starred: false } : m)));
+      toast('Message unstarred', 'success');
+    } else {
+      await supabase.from('starred_messages').insert({ message_id: message.id, user_id: profile.id });
+      setMessages((prev) => prev.map((m) => (m.id === message.id ? { ...m, starred: true } : m)));
+      toast('Message starred', 'success');
+    }
+  };
+
+  const handleTogglePin = async () => {
+    if (!profile || !activeId) return;
+    const newVal = !activeConversation?.pinned;
+    await supabase.from('conversation_participants').update({ pinned: newVal }).eq('conversation_id', activeId).eq('user_id', profile.id);
+    setConversations((prev) => prev.map((c) => (c.id === activeId ? { ...c, pinned: newVal } : c)));
+    toast(newVal ? 'Chat pinned' : 'Chat unpinned', 'success');
+  };
+
+  const handleToggleMute = async () => {
+    if (!profile || !activeId) return;
+    const newVal = !activeConversation?.muted;
+    await supabase.from('conversation_participants').update({ muted: newVal }).eq('conversation_id', activeId).eq('user_id', profile.id);
+    setConversations((prev) => prev.map((c) => (c.id === activeId ? { ...c, muted: newVal } : c)));
+    toast(newVal ? 'Chat muted' : 'Chat unmuted', 'success');
+  };
+
+  const handleToggleArchive = async () => {
+    if (!profile || !activeId) return;
+    const newVal = !activeConversation?.archived;
+    await supabase.from('conversation_participants').update({ archived: newVal }).eq('conversation_id', activeId).eq('user_id', profile.id);
+    setConversations((prev) => prev.map((c) => (c.id === activeId ? { ...c, archived: newVal } : c)));
+    toast(newVal ? 'Chat archived' : 'Chat unarchived', 'success');
+  };
+
+  const handleClearChat = async () => {
+    if (!profile || !activeId) return;
+    if (!confirm('Clear all messages in this chat? This cannot be undone.')) return;
+    // Hide all messages for me
+    const rows = messages.map((m) => ({ message_id: m.id, user_id: profile.id }));
+    if (rows.length) await supabase.from('message_hidden').upsert(rows, { onConflict: 'message_id,user_id' });
+    setMessages([]);
+    toast('Chat cleared', 'success');
+  };
+
+  const handleExportChat = () => {
+    const lines = messages.map((m) => {
+      const sender = participants[m.sender_id]?.full_name ?? 'Unknown';
+      const time = new Date(m.created_at).toLocaleString();
+      const content = m.deleted_for_everyone ? '[deleted]' : m.text ?? `[${m.media_type ?? 'media'}]`;
+      return `[${time}] ${sender}: ${content}`;
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat-export-${activeId}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Chat exported', 'success');
+  };
+
+  const handleCall = (type: 'voice' | 'video') => {
+    if (activeConversation) setCallState({ conversation: activeConversation, type });
   };
 
   // Browser notification on new incoming message
@@ -309,10 +409,10 @@ function ChatApp() {
     if (!profile || !activeConversation) return;
     const last = messages[messages.length - 1];
     if (!last || last.sender_id === profile.id) return;
-    if (Notification.permission === 'granted' && document.hidden) {
+    if (Notification.permission === 'granted' && document.hidden && !activeConversation.muted) {
       const sender = participants[last.sender_id];
       new Notification(`New message from ${sender?.full_name ?? 'Unknown'}`, {
-        body: last.text ?? (last.media_type === 'image' ? 'Sent a photo' : 'Sent a document'),
+        body: last.text ?? (last.media_type === 'image' ? 'Sent a photo' : last.media_type === 'voice' ? 'Sent a voice note' : 'Sent a file'),
       });
     }
   }, [messages.length, profile, activeConversation, participants]);
@@ -338,6 +438,10 @@ function ChatApp() {
           loading={loadingConvos}
           onSelect={setActiveId}
           onNewChat={() => setShowNewChat(true)}
+          onOpenSearch={() => setShowSearch(true)}
+          onOpenSettings={() => setShowSettings(true)}
+          onOpenProfile={() => setShowProfile(true)}
+          onOpenStory={(uid) => setStoryUserId(uid)}
         />
       </div>
       <div className={`${activeId ? 'flex' : 'hidden md:flex'} flex-1`}>
@@ -354,6 +458,15 @@ function ChatApp() {
           onDeleteForEveryone={handleDeleteForEveryone}
           onMarkRead={handleMarkRead}
           onSetTyping={handleSetTyping}
+          onReact={handleReact}
+          onStar={handleStar}
+          onTogglePin={handleTogglePin}
+          onToggleMute={handleToggleMute}
+          onToggleArchive={handleToggleArchive}
+          onClearChat={handleClearChat}
+          onExportChat={handleExportChat}
+          onForward={(m) => setForwardMessage(m)}
+          onCall={handleCall}
         />
       </div>
 
@@ -364,20 +477,39 @@ function ChatApp() {
           onChatCreated={(id) => { setShowNewChat(false); setActiveId(id); loadConversations(); }}
         />
       )}
-
-      {/* Profile button floating */}
-      <button
-        onClick={() => setShowProfile(true)}
-        className="fixed bottom-4 left-4 z-40 p-3 rounded-full bg-white dark:bg-slate-800 shadow-lg border border-slate-100 dark:border-slate-700 hover:scale-105 transition"
-        title="My Profile"
-      >
-        <img
-          src={profile.avatar_url ?? ''}
-          alt={profile.full_name}
-          className="w-8 h-8 rounded-full object-cover"
-          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+      {showSearch && (
+        <SearchModal
+          onClose={() => setShowSearch(false)}
+          onUserSelect={() => { setShowSearch(false); setShowNewChat(true); }}
+          onMessageSelect={(id) => { setShowSearch(false); setActiveId(id); }}
         />
-      </button>
+      )}
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onEditProfile={() => { setShowSettings(false); setShowProfile(true); }}
+          onOpenBlocked={() => { setShowSettings(false); setShowBlocked(true); }}
+        />
+      )}
+      {showBlocked && <BlockedContactsModal onClose={() => setShowBlocked(false)} />}
+      {forwardMessage && (
+        <ForwardModal
+          message={forwardMessage}
+          onClose={() => setForwardMessage(null)}
+          onForwarded={(id) => { setForwardMessage(null); setActiveId(id); toast('Message forwarded', 'success'); }}
+        />
+      )}
+      {callState && (
+        <CallModal
+          conversation={callState.conversation}
+          callType={callState.type}
+          onClose={() => setCallState(null)}
+          participants={participants}
+        />
+      )}
+      {storyUserId && (
+        <StoryViewer userId={storyUserId} onClose={() => setStoryUserId(null)} />
+      )}
     </div>
   );
 }
@@ -385,9 +517,11 @@ function ChatApp() {
 export default function App() {
   return (
     <ThemeProvider>
-      <AuthProvider>
-        <ChatApp />
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider>
+          <ChatApp />
+        </AuthProvider>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { Search, Plus, Pin, MessageCircle, Loader2, MoreVertical, LogOut, Moon, Sun, User } from 'lucide-react';
+import { Search, Plus, Pin, MessageCircle, Loader2, MoreVertical, LogOut, Moon, Sun, User, Settings as SettingsIcon, Archive, Star, BellOff, Check, CheckCheck } from 'lucide-react';
 import type { Conversation } from '@/types';
 import { formatRelative } from '@/utils';
 import Avatar from '@/components/Avatar';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
+import { StoriesBar } from '@/components/Stories';
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -12,27 +13,37 @@ interface SidebarProps {
   loading: boolean;
   onSelect: (id: string) => void;
   onNewChat: () => void;
+  onOpenSearch: () => void;
+  onOpenSettings: () => void;
+  onOpenProfile: () => void;
+  onOpenStory: (userId: string) => void;
 }
 
-export default function Sidebar({ conversations, activeId, loading, onSelect, onNewChat }: SidebarProps) {
+export default function Sidebar({ conversations, activeId, loading, onSelect, onNewChat, onOpenSearch, onOpenSettings, onOpenProfile, onOpenStory }: SidebarProps) {
   const { profile, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const filtered = conversations.filter((c) => {
+    if (showArchived !== !!c.archived) return false;
     if (!query.trim()) return true;
     const other = c.participants.find((p) => p.id !== profile?.id);
-    const name = other?.full_name ?? '';
+    const name = c.is_self ? 'Message Yourself' : c.is_group ? (c.name ?? '') : (other?.full_name ?? '');
     return name.toLowerCase().includes(query.toLowerCase());
   });
 
   const sorted = [...filtered].sort((a, b) => {
+    if (a.is_self && !b.is_self) return -1;
+    if (!a.is_self && b.is_self) return 1;
     if (!!b.pinned !== !!a.pinned) return b.pinned ? 1 : -1;
     const aTime = a.last_message ? new Date(a.last_message.created_at).getTime() : 0;
     const bTime = b.last_message ? new Date(b.last_message.created_at).getTime() : 0;
     return bTime - aTime;
   });
+
+  const archivedCount = conversations.filter((c) => c.archived).length;
 
   return (
     <aside className="w-full md:w-96 shrink-0 border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col h-full">
@@ -44,43 +55,41 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
           </div>
           <h1 className="text-lg font-semibold text-slate-800 dark:text-white">ChatWave</h1>
         </div>
-        <div className="relative">
-          <button
-            onClick={() => setMenuOpen((v) => !v)}
-            className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300"
-          >
-            <MoreVertical className="w-5 h-5" />
+        <div className="flex items-center gap-1">
+          <button onClick={onOpenSearch} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300">
+            <Search className="w-5 h-5" />
           </button>
-          {menuOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 z-20 w-44 bg-white dark:bg-slate-700 rounded-xl shadow-lg border border-slate-100 dark:border-slate-600 py-1">
-                <button
-                  onClick={() => { setMenuOpen(false); toggleTheme(); }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600"
-                >
-                  {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
-                  {theme === 'light' ? 'Dark mode' : 'Light mode'}
-                </button>
-                <button
-                  onClick={() => setMenuOpen(false)}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600"
-                >
-                  <User className="w-4 h-4" />
-                  Profile
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(false); signOut(); }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20"
-                >
-                  <LogOut className="w-4 h-4" />
-                  Sign out
-                </button>
-              </div>
-            </>
-          )}
+          <div className="relative">
+            <button onClick={() => setMenuOpen((v) => !v)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300">
+              <MoreVertical className="w-5 h-5" />
+            </button>
+            {menuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-20 w-48 bg-white dark:bg-slate-700 rounded-xl shadow-lg border border-slate-100 dark:border-slate-600 py-1">
+                  <button onClick={() => { setMenuOpen(false); onOpenProfile(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600">
+                    <User className="w-4 h-4" /> Profile
+                  </button>
+                  <button onClick={() => { setMenuOpen(false); onOpenSettings(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600">
+                    <SettingsIcon className="w-4 h-4" /> Settings
+                  </button>
+                  <button onClick={() => { setMenuOpen(false); toggleTheme(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600">
+                    {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+                    {theme === 'light' ? 'Dark mode' : 'Light mode'}
+                  </button>
+                  <div className="border-t border-slate-100 dark:border-slate-600 my-1" />
+                  <button onClick={() => { setMenuOpen(false); signOut(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20">
+                    <LogOut className="w-4 h-4" /> Sign out
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Stories */}
+      <StoriesBar onOpenStory={onOpenStory} />
 
       {/* Search */}
       <div className="px-4 py-3">
@@ -95,6 +104,14 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
           />
         </div>
       </div>
+
+      {/* Archive toggle */}
+      {archivedCount > 0 && (
+        <button onClick={() => setShowArchived((v) => !v)} className="flex items-center gap-3 px-4 py-2 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+          <Archive className="w-4 h-4" />
+          {showArchived ? 'Active chats' : `Archived (${archivedCount})`}
+        </button>
+      )}
 
       {/* Conversation list */}
       <div className="flex-1 overflow-y-auto">
@@ -115,7 +132,7 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
         {!loading && sorted.length === 0 && (
           <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
             <MessageCircle className="w-12 h-12 text-slate-300 dark:text-slate-600 mb-3" />
-            <p className="text-slate-400 font-medium">No conversations yet</p>
+            <p className="text-slate-400 font-medium">{showArchived ? 'No archived chats' : 'No conversations yet'}</p>
             <p className="text-sm text-slate-400 mt-1">Start a new chat to get going</p>
           </div>
         )}
@@ -129,9 +146,19 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
               ? 'This message was deleted'
               : last.media_type === 'image'
                 ? 'Photo'
-                : last.media_type === 'document'
-                  ? last.media_name ?? 'Document'
-                  : last.text ?? ''
+                : last.media_type === 'video'
+                  ? 'Video'
+                  : last.media_type === 'voice'
+                    ? 'Voice note'
+                    : last.media_type === 'audio'
+                      ? 'Audio'
+                      : last.media_type === 'document'
+                        ? last.media_name ?? 'Document'
+                        : last.location_lat != null
+                          ? 'Location'
+                          : last.contact_name
+                            ? 'Contact'
+                            : last.text ?? ''
             : 'No messages yet';
           const previewPrefix = last && last.sender_id === profile?.id ? 'You: ' : '';
 
@@ -145,12 +172,15 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
                   : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-700/50'
               }`}
             >
-              <Avatar src={other.avatar_url} name={other.full_name} id={other.id} size="md" />
+              <Avatar src={other?.avatar_url} name={other?.full_name ?? 'Unknown'} id={other?.id ?? 'x'} size="md" verified={other?.is_verified} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 min-w-0">
                     {c.pinned && <Pin className="w-3 h-3 text-slate-400 shrink-0" />}
-                    <span className="font-medium text-slate-800 dark:text-white truncate">{other.full_name}</span>
+                    {c.muted && <BellOff className="w-3 h-3 text-slate-400 shrink-0" />}
+                    <span className="font-medium text-slate-800 dark:text-white truncate">
+                      {c.is_self ? 'Message Yourself' : c.is_group ? (c.name ?? 'Group') : other?.full_name ?? 'Unknown'}
+                    </span>
                   </div>
                   {last && (
                     <span className="text-xs text-slate-400 shrink-0">{formatRelative(last.created_at)}</span>
@@ -164,6 +194,10 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
                     <span className="shrink-0 min-w-5 h-5 px-1.5 rounded-full bg-emerald-500 text-white text-xs font-semibold flex items-center justify-center">
                       {c.unread_count}
                     </span>
+                  ) : last && last.sender_id === profile?.id && !last.deleted_for_everyone ? (
+                    last.read_by && last.read_by.length > 0
+                      ? <CheckCheck className="w-4 h-4 text-sky-500 shrink-0" />
+                      : <Check className="w-4 h-4 text-slate-300 shrink-0" />
                   ) : null}
                 </div>
               </div>

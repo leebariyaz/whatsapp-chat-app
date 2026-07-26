@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Paperclip, Smile, Image as ImageIcon, FileText, Loader2, ArrowLeft, Phone, Video } from 'lucide-react';
+import { Send, Paperclip, Smile, Image as ImageIcon, FileText, Loader2, ArrowLeft, Phone, Video, Mic, MapPin, Contact, Star, Trash2, Archive, BellOff, Pin, Download, X } from 'lucide-react';
 import type { Conversation, Message, Profile } from '@/types';
 import { formatLastSeen } from '@/utils';
 import Avatar from '@/components/Avatar';
@@ -7,6 +7,7 @@ import MessageBubble, { ReplyPreviewBar } from '@/components/MessageBubble';
 import EmojiPicker from '@/components/EmojiPicker';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/context/AuthContext';
+import { useToast } from '@/context/ToastContext';
 
 interface ChatAreaProps {
   conversation: Conversation | null;
@@ -15,33 +16,52 @@ interface ChatAreaProps {
   participants: Record<string, Profile>;
   typingUserIds: string[];
   onBack: () => void;
-  onSendMessage: (payload: { text?: string; mediaUrl?: string; mediaType?: string; mediaName?: string; replyToId?: string }) => Promise<void>;
+  onSendMessage: (payload: { text?: string; mediaUrl?: string; mediaType?: string; mediaName?: string; replyToId?: string; duration?: number; forwardedFromId?: string; locationLat?: number; locationLng?: number; contactName?: string; contactPhone?: string }) => Promise<void>;
   onEditMessage: (message: Message, newText: string) => Promise<void>;
   onDeleteForMe: (message: Message) => Promise<void>;
   onDeleteForEveryone: (message: Message) => Promise<void>;
   onMarkRead: (messages: Message[]) => Promise<void>;
   onSetTyping: (isTyping: boolean) => Promise<void>;
+  onReact: (messageId: string, emoji: string) => Promise<void>;
+  onStar: (message: Message) => Promise<void>;
+  onTogglePin: () => Promise<void>;
+  onToggleMute: () => Promise<void>;
+  onToggleArchive: () => Promise<void>;
+  onClearChat: () => Promise<void>;
+  onExportChat: () => void;
+  onForward: (message: Message) => void;
+  onCall: (type: 'voice' | 'video') => void;
 }
 
 export default function ChatArea({
   conversation, messages, loadingMessages, participants, typingUserIds,
   onBack, onSendMessage, onEditMessage, onDeleteForMe, onDeleteForEveryone, onMarkRead, onSetTyping,
+  onReact, onStar, onTogglePin, onToggleMute, onToggleArchive, onClearChat, onExportChat, onForward, onCall,
 }: ChatAreaProps) {
   const { profile } = useAuth();
+  const { toast } = useToast();
   const [text, setText] = useState('');
   const [showEmoji, setShowEmoji] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [copied, setCopied] = useState(false);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [recordTime, setRecordTime] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLInputElement>(null);
+  const audioRef = useRef<HTMLInputElement>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const otherUser = conversation?.participants.find((p) => p.id !== profile?.id);
   const isGroup = conversation?.is_group ?? false;
+  const isSelf = conversation?.is_self ?? false;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -59,6 +79,7 @@ export default function ChatArea({
     setReplyTo(null);
     setEditing(null);
     setShowEmoji(false);
+    setShowMenu(false);
   }, [conversation?.id]);
 
   const handleSend = async () => {
@@ -83,11 +104,11 @@ export default function ChatArea({
     typingTimer.current = setTimeout(() => onSetTyping(false), 2500);
   };
 
-  const uploadMedia = async (file: File, type: 'image' | 'document') => {
+  const uploadMedia = async (file: File, type: 'image' | 'video' | 'audio' | 'voice' | 'document') => {
     if (!profile || !conversation) return;
     setUploading(true);
     try {
-      const ext = file.name.split('.').pop();
+      const ext = file.name.split('.').pop() || 'bin';
       const path = `${profile.id}/${type}-${Date.now()}.${ext}`;
       const { error: upErr } = await supabase.storage.from('chat-media').upload(path, file);
       if (upErr) throw upErr;
@@ -102,27 +123,77 @@ export default function ChatArea({
       setText('');
     } catch (err) {
       console.error('Upload failed', err);
+      toast('Failed to upload file', 'error');
     } finally {
       setUploading(false);
     }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => audioChunksRef.current.push(e.data);
+      recorder.onstop = async () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const file = new File([blob], `voice-${Date.now()}.webm`, { type: 'audio/webm' });
+        await uploadMedia(file, 'voice');
+        stream.getTracks().forEach((t) => t.stop());
+      };
+      recorder.start();
+      setRecording(true);
+      setRecordTime(0);
+      recordTimerRef.current = setInterval(() => setRecordTime((t) => t + 1), 1000);
+    } catch (err) {
+      console.error('Microphone access denied', err);
+      toast('Microphone access denied', 'error');
+    }
+  };
+
+  const stopRecording = (cancel: boolean) => {
+    if (recordTimerRef.current) clearInterval(recordTimerRef.current);
+    if (recording && mediaRecorderRef.current) {
+      if (cancel) {
+        mediaRecorderRef.current.ondataavailable = null;
+        mediaRecorderRef.current.onstop = () => {
+          mediaRecorderRef.current?.stream.getTracks().forEach((t) => t.stop());
+        };
+      }
+      mediaRecorderRef.current.stop();
+    }
+    setRecording(false);
+    setRecordTime(0);
   };
 
   const handleCopy = (t: string) => {
     navigator.clipboard.writeText(t);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+    toast('Copied to clipboard', 'success');
+  };
+
+  const sendLocation = () => {
+    if (!navigator.geolocation) { toast('Geolocation not supported', 'error'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        onSendMessage({ locationLat: pos.coords.latitude, locationLng: pos.coords.longitude });
+      },
+      () => toast('Could not get your location', 'error')
+    );
   };
 
   if (!conversation) {
     return (
-      <div className="flex-1 hidden md:flex items-center justify-center bg-slate-50 dark:bg-slate-900">
+      <div className="flex-1 hidden md:flex items-center justify-center bg-slate-50 dark:bg-slate-900 chat-bg">
         <div className="text-center max-w-sm px-8">
           <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-blue-100 to-emerald-100 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center">
             <Send className="w-10 h-10 text-blue-400" />
           </div>
-          <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-200 mb-2">ChatWave Web</h2>
+          <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-200 mb-2">ChatWave</h2>
           <p className="text-slate-400 text-sm leading-relaxed">
-            Select a conversation from the left to start messaging, or begin a new chat. Your messages are end-to-end secured and synced in real time.
+            Select a conversation to start messaging, or begin a new chat. Your messages are synced in real time.
           </p>
         </div>
       </div>
@@ -134,30 +205,74 @@ export default function ChatArea({
     .map((id) => participants[id]?.full_name?.split(' ')[0])
     .filter(Boolean);
 
+  const headerName = isSelf ? 'Message Yourself' : isGroup ? (conversation.name ?? 'Group chat') : (otherUser?.full_name ?? 'Unknown');
+  const headerSub = isSelf ? 'Your private notes space' : typingNames.length > 0
+    ? <span className="text-emerald-500">{typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing...</span>
+    : isGroup ? `${conversation.participants.length} members` : otherUser ? formatLastSeen(otherUser.last_seen) : '';
+
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-slate-900 relative">
+    <div className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-slate-900 chat-bg relative">
       {/* Header */}
       <div className="flex items-center gap-3 px-4 py-3 bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700">
         <button onClick={onBack} className="md:hidden p-1.5 -ml-1 text-slate-500 dark:text-slate-300">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <Avatar src={otherUser?.avatar_url} name={otherUser?.full_name ?? 'Unknown'} id={otherUser?.id ?? 'x'} size="sm" />
+        <Avatar src={otherUser?.avatar_url} name={headerName} id={otherUser?.id ?? 'x'} size="sm" verified={otherUser?.is_verified} />
         <div className="flex-1 min-w-0">
-          <h2 className="font-semibold text-slate-800 dark:text-white truncate">
-            {isGroup ? 'Group chat' : otherUser?.full_name ?? 'Unknown'}
-          </h2>
-          <p className="text-xs text-slate-400 truncate">
-            {typingNames.length > 0 ? (
-              <span className="text-emerald-500">{typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing...</span>
-            ) : isGroup ? `${conversation.participants.length} members` : otherUser ? formatLastSeen(otherUser.last_seen) : ''}
-          </p>
+          <h2 className="font-semibold text-slate-800 dark:text-white truncate">{headerName}</h2>
+          <p className="text-xs text-slate-400 truncate">{headerSub}</p>
         </div>
-        <button className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
-          <Video className="w-5 h-5" />
-        </button>
-        <button className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
+        {conversation.pinned && <Pin className="w-4 h-4 text-slate-400" />}
+        {conversation.muted && <BellOff className="w-4 h-4 text-slate-400" />}
+        <button onClick={() => onCall('voice')} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
           <Phone className="w-5 h-5" />
         </button>
+        <button onClick={() => onCall('video')} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
+          <Video className="w-5 h-5" />
+        </button>
+        <div className="relative">
+          <button onClick={() => setShowMenu((v) => !v)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
+            <Paperclip className="w-5 h-5" />
+          </button>
+          {showMenu && (
+            <>
+              <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+              <div className="absolute right-0 top-full mt-1 z-20 w-48 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-100 dark:border-slate-600 py-1">
+                <button onClick={() => { imageRef.current?.click(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <ImageIcon className="w-4 h-4" /> Photo
+                </button>
+                <button onClick={() => { videoRef.current?.click(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <Video className="w-4 h-4" /> Video
+                </button>
+                <button onClick={() => { audioRef.current?.click(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <Mic className="w-4 h-4" /> Audio file
+                </button>
+                <button onClick={() => { fileRef.current?.click(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <FileText className="w-4 h-4" /> Document
+                </button>
+                <button onClick={() => { sendLocation(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <MapPin className="w-4 h-4" /> Location
+                </button>
+                <div className="border-t border-slate-100 dark:border-slate-600 my-1" />
+                <button onClick={() => { onTogglePin(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <Pin className="w-4 h-4" /> {conversation.pinned ? 'Unpin' : 'Pin'}
+                </button>
+                <button onClick={() => { onToggleMute(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <BellOff className="w-4 h-4" /> {conversation.muted ? 'Unmute' : 'Mute'}
+                </button>
+                <button onClick={() => { onToggleArchive(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <Archive className="w-4 h-4" /> {conversation.archived ? 'Unarchive' : 'Archive'}
+                </button>
+                <button onClick={() => { onExportChat(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700">
+                  <Download className="w-4 h-4" /> Export chat
+                </button>
+                <button onClick={() => { onClearChat(); setShowMenu(false); }} className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20">
+                  <Trash2 className="w-4 h-4" /> Clear chat
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Messages */}
@@ -185,6 +300,9 @@ export default function ChatArea({
             onDeleteForMe={onDeleteForMe}
             onDeleteForEveryone={onDeleteForEveryone}
             onCopy={handleCopy}
+            onReact={onReact}
+            onStar={onStar}
+            onForward={onForward}
           />
         ))}
       </div>
@@ -198,67 +316,53 @@ export default function ChatArea({
         />
       )}
 
-      {/* Image preview modal */}
-      {previewImage && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
-          <img src={previewImage} alt="Preview" className="max-w-full max-h-full rounded-lg" />
-        </div>
-      )}
-
       {/* Input */}
       <div className="px-4 py-3 bg-white dark:bg-slate-800 border-t border-slate-100 dark:border-slate-700">
-        <div className="flex items-end gap-2 relative">
-          {showEmoji && (
-            <EmojiPicker
-              onSelect={(e) => setText((t) => t + e)}
-              onClose={() => setShowEmoji(false)}
-            />
-          )}
-
-          <button
-            onClick={() => setShowEmoji((v) => !v)}
-            className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400"
-          >
-            <Smile className="w-5 h-5" />
-          </button>
-
-          <div className="relative">
-            <button className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
-              <Paperclip className="w-5 h-5" />
-            </button>
-            <div className="absolute bottom-full mb-1 left-0 hidden group-hover:block">
-              <div className="flex flex-col gap-1 bg-white dark:bg-slate-700 rounded-xl shadow-lg p-1 border border-slate-100 dark:border-slate-600">
-                <button onClick={() => imageRef.current?.click()} className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 rounded-lg">
-                  <ImageIcon className="w-4 h-4" /> Photo
-                </button>
-                <button onClick={() => fileRef.current?.click()} className="flex items-center gap-2 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600 rounded-lg">
-                  <FileText className="w-4 h-4" /> Document
-                </button>
-              </div>
+        {recording ? (
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-1">
+              <span className="w-3 h-3 rounded-full bg-rose-500 animate-pulse" />
+              <span className="text-sm text-slate-500 dark:text-slate-300">Recording... {recordTime}s</span>
             </div>
+            <button onClick={() => stopRecording(true)} className="p-2 rounded-full text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20">
+              <X className="w-5 h-5" />
+            </button>
+            <button onClick={() => stopRecording(false)} className="p-3 rounded-full bg-gradient-to-br from-blue-500 to-emerald-500 text-white">
+              <Send className="w-5 h-5" />
+            </button>
           </div>
+        ) : (
+          <div className="flex items-end gap-2 relative">
+            {showEmoji && (
+              <EmojiPicker onSelect={(e) => setText((t) => t + e)} onClose={() => setShowEmoji(false)} />
+            )}
+            <button onClick={() => setShowEmoji((v) => !v)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
+              <Smile className="w-5 h-5" />
+            </button>
+            <input ref={imageRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'image'); e.target.value = ''; }} />
+            <input ref={videoRef} type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'video'); e.target.value = ''; }} />
+            <input ref={audioRef} type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'audio'); e.target.value = ''; }} />
+            <input ref={fileRef} type="file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'document'); e.target.value = ''; }} />
 
-          <input ref={imageRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'image'); e.target.value = ''; }} />
-          <input ref={fileRef} type="file" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'document'); e.target.value = ''; }} />
-
-          <textarea
-            value={text}
-            onChange={(e) => handleTyping(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder={editing ? 'Edit message...' : 'Type a message...'}
-            rows={1}
-            className="flex-1 max-h-32 px-4 py-2.5 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800 resize-none"
-          />
-
-          <button
-            onClick={handleSend}
-            disabled={!text.trim() || uploading}
-            className="p-3 rounded-full bg-gradient-to-br from-blue-500 to-emerald-500 text-white hover:opacity-90 disabled:opacity-40 transition shrink-0"
-          >
-            {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-          </button>
-        </div>
-        {copied && <p className="absolute -top-6 right-4 text-xs text-emerald-500">Copied!</p>}
+            <textarea
+              value={text}
+              onChange={(e) => handleTyping(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+              placeholder={editing ? 'Edit message...' : 'Type a message...'}
+              rows={1}
+              className="flex-1 max-h-32 px-4 py-2.5 rounded-2xl bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-800 resize-none"
+            />
+            {text.trim() ? (
+              <button onClick={handleSend} disabled={uploading} className="p-3 rounded-full bg-gradient-to-br from-blue-500 to-emerald-500 text-white hover:opacity-90 disabled:opacity-40 transition shrink-0">
+                {uploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+              </button>
+            ) : (
+              <button onClick={startRecording} className="p-3 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400 transition shrink-0">
+                <Mic className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
