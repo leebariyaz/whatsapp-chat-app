@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Paperclip, Smile, Image as ImageIcon, FileText, Loader2, ArrowLeft, Phone, Video, Mic, MapPin, Contact, Star, Trash2, Archive, BellOff, Pin, Download, X } from 'lucide-react';
+import { Send, Paperclip, Smile, Image as ImageIcon, FileText, Loader2, ArrowLeft, Phone, Video, Mic, MapPin, Contact, Star, Trash2, Archive, BellOff, Pin, Download, X, Bold, Italic, Code, List, ListOrdered, Strikethrough, Wrench, Palette, Clock } from 'lucide-react';
 import type { Conversation, Message, Profile } from '@/types';
 import { formatLastSeen } from '@/utils';
 import Avatar from '@/components/Avatar';
@@ -31,12 +31,15 @@ interface ChatAreaProps {
   onExportChat: () => void;
   onForward: (message: Message) => void;
   onCall: (type: 'voice' | 'video') => void;
+  onOpenTools: () => void;
+  onOpenCustomize: () => void;
+  onOpenScheduled: () => void;
 }
 
 export default function ChatArea({
   conversation, messages, loadingMessages, participants, typingUserIds,
   onBack, onSendMessage, onEditMessage, onDeleteForMe, onDeleteForEveryone, onMarkRead, onSetTyping,
-  onReact, onStar, onTogglePin, onToggleMute, onToggleArchive, onClearChat, onExportChat, onForward, onCall,
+  onReact, onStar, onTogglePin, onToggleMute, onToggleArchive, onClearChat, onExportChat, onForward, onCall, onOpenTools, onOpenCustomize, onOpenScheduled,
 }: ChatAreaProps) {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -47,6 +50,7 @@ export default function ChatArea({
   const [editing, setEditing] = useState<Message | null>(null);
   const [copied, setCopied] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showFormat, setShowFormat] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordTime, setRecordTime] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -191,7 +195,7 @@ export default function ChatArea({
           <div className="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-blue-100 to-emerald-100 dark:from-slate-700 dark:to-slate-800 flex items-center justify-center">
             <Send className="w-10 h-10 text-blue-400" />
           </div>
-          <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-200 mb-2">ChatWave</h2>
+          <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-200 mb-2">Pulse</h2>
           <p className="text-slate-400 text-sm leading-relaxed">
             Select a conversation to start messaging, or begin a new chat. Your messages are synced in real time.
           </p>
@@ -229,6 +233,15 @@ export default function ChatArea({
         </button>
         <button onClick={() => onCall('video')} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
           <Video className="w-5 h-5" />
+        </button>
+        <button onClick={onOpenTools} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400" title="Chat tools">
+          <Wrench className="w-5 h-5" />
+        </button>
+        <button onClick={onOpenCustomize} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400" title="Customise">
+          <Palette className="w-5 h-5" />
+        </button>
+        <button onClick={onOpenScheduled} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400" title="Scheduled messages">
+          <Clock className="w-5 h-5" />
         </button>
         <div className="relative">
           <button onClick={() => setShowMenu((v) => !v)} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
@@ -339,6 +352,19 @@ export default function ChatArea({
             <button onClick={() => setShowEmoji((v) => !v)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400">
               <Smile className="w-5 h-5" />
             </button>
+            <button onClick={() => setShowFormat((v) => !v)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-400" title="Formatting">
+              <Bold className="w-5 h-5" />
+            </button>
+            {showFormat && (
+              <div className="absolute bottom-full mb-2 left-0 flex items-center gap-1 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-100 dark:border-slate-600 p-1.5 z-30">
+                <button onClick={() => setText((t) => `**${t}**`)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300"><Bold className="w-4 h-4" /></button>
+                <button onClick={() => setText((t) => `*${t}*`)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300"><Italic className="w-4 h-4" /></button>
+                <button onClick={() => setText((t) => `~~${t}~~`)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300"><Strikethrough className="w-4 h-4" /></button>
+                <button onClick={() => setText((t) => '`' + t + '`')} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300"><Code className="w-4 h-4" /></button>
+                <button onClick={() => setText((t) => `- ${t}`)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300"><List className="w-4 h-4" /></button>
+                <button onClick={() => setText((t) => `1. ${t}`)} className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300"><ListOrdered className="w-4 h-4" /></button>
+              </div>
+            )}
             <input ref={imageRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'image'); e.target.value = ''; }} />
             <input ref={videoRef} type="file" accept="video/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'video'); e.target.value = ''; }} />
             <input ref={audioRef} type="file" accept="audio/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadMedia(f, 'audio'); e.target.value = ''; }} />

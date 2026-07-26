@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from 'react';
-import { MessageCircle, Loader2, Mail, Lock, User, AtSign, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { Loader2, Mail, Lock, User, AtSign, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
+import Logo from '@/components/Logo';
 
 type Mode = 'login' | 'signup' | 'forgot' | 'verify';
 
@@ -97,10 +98,8 @@ export default function AuthPage() {
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-100 via-blue-50 to-emerald-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
       <div className="w-full max-w-md">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-emerald-500 flex items-center justify-center mb-4 shadow-lg">
-            <MessageCircle className="w-9 h-9 text-white" />
-          </div>
-          <h1 className="text-2xl font-bold text-slate-800 dark:text-white">ChatWave</h1>
+          <Logo size="lg" />
+          <h1 className="text-2xl font-bold text-slate-800 dark:text-white mt-4">Pulse</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">
             {mode === 'login' ? 'Welcome back' : mode === 'signup' ? 'Create your account' : mode === 'forgot' ? 'Reset your password' : 'Verify your email'}
           </p>

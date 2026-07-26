@@ -1,20 +1,38 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import Sidebar from '@/components/Sidebar';
 import ChatArea from '@/components/ChatArea';
 import AuthPage from '@/components/AuthPage';
 import ProfileModal from '@/components/ProfileModal';
 import NewChatModal from '@/components/NewChatModal';
-import SearchModal from '@/components/SearchModal';
-import SettingsModal from '@/components/SettingsModal';
-import BlockedContactsModal from '@/components/BlockedContactsModal';
-import ForwardModal from '@/components/ForwardModal';
-import { CallModal } from '@/components/Calls';
-import { StoryViewer } from '@/components/Stories';
+import SplashScreen, { Onboarding } from '@/components/SplashScreen';
+import QRModal from '@/components/QRModal';
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { ToastProvider, useToast } from '@/context/ToastContext';
+import { AccessibilityProvider } from '@/context/AccessibilityContext';
 import { supabase } from '@/lib/supabase';
+import { useKeyboardShortcuts } from '@/lib/keyboard';
 import type { Conversation, Message, Profile } from '@/types';
+
+// Lazy-loaded modals (code splitting)
+const SearchModal = lazy(() => import('@/components/SearchModal'));
+const SettingsModal = lazy(() => import('@/components/SettingsModal'));
+const BlockedContactsModal = lazy(() => import('@/components/BlockedContactsModal'));
+const ForwardModal = lazy(() => import('@/components/ForwardModal'));
+import { CallModal } from '@/components/Calls';
+import { StoryViewer } from '@/components/Stories';
+const ChatToolsModal = lazy(() => import('@/components/ChatToolsModal'));
+const ChatCustomizeModal = lazy(() => import('@/components/ChatCustomizeModal'));
+const ScheduledMessagesModal = lazy(() => import('@/components/ScheduledMessagesModal'));
+const DashboardModal = lazy(() => import('@/components/DashboardModal'));
+const WhatsNewModal = lazy(() => import('@/components/WhatsNewModal'));
+const FriendRequestsModal = lazy(() => import('@/components/FriendRequestsModal'));
+const DeviceSecurityModal = lazy(() => import('@/components/DeviceSecurityModal'));
+import { FolderManager } from '@/components/ChatFolders';
+
+function ModalFallback() {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"><div className="w-8 h-8 border-2 border-teal-500 border-t-transparent rounded-full animate-spin" /></div>;
+}
 
 function ChatApp() {
   const { session, profile, loading } = useAuth();
@@ -26,6 +44,8 @@ function ChatApp() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [participants, setParticipants] = useState<Record<string, Profile>>({});
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
+
+  // Modal states
   const [showProfile, setShowProfile] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -34,11 +54,73 @@ function ChatApp() {
   const [forwardMessage, setForwardMessage] = useState<Message | null>(null);
   const [callState, setCallState] = useState<{ conversation: Conversation; type: 'voice' | 'video' } | null>(null);
   const [storyUserId, setStoryUserId] = useState<string | null>(null);
+  const [showSplash, setShowSplash] = useState(() => !sessionStorage.getItem('pulse-splash-seen'));
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showQR, setShowQR] = useState(false);
+  const [showTools, setShowTools] = useState(false);
+  const [showCustomize, setShowCustomize] = useState(false);
+  const [showScheduled, setShowScheduled] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+  const [showFriendRequests, setShowFriendRequests] = useState(false);
+  const [showDeviceSecurity, setShowDeviceSecurity] = useState(false);
+  const [showFolderManager, setShowFolderManager] = useState(false);
+  const [activeFolder, setActiveFolder] = useState<string | null>(null);
+  const [friendRequestCount, setFriendRequestCount] = useState(0);
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
     [conversations, activeId]
   );
+
+  // Splash screen
+  useEffect(() => {
+    if (!showSplash) return;
+    const t = setTimeout(() => {
+      setShowSplash(false);
+      sessionStorage.setItem('pulse-splash-seen', 'true');
+      // Show onboarding for first-time users
+      if (session && profile && !localStorage.getItem('pulse-onboarded')) {
+        setShowOnboarding(true);
+      }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [showSplash, session, profile]);
+
+  const handleOnboardingComplete = () => {
+    setShowOnboarding(false);
+    localStorage.setItem('pulse-onboarded', 'true');
+  };
+
+  // Keyboard shortcuts
+  useKeyboardShortcuts([
+    { key: 'k', ctrl: true, handler: () => setShowSearch(true) },
+    { key: 'n', ctrl: true, handler: () => setShowNewChat(true) },
+    { key: 'd', ctrl: true, handler: () => setShowDashboard(true) },
+    { key: ',', ctrl: true, handler: () => setShowSettings(true) },
+    { key: 'Escape', handler: () => {
+      setShowSearch(false); setShowNewChat(false); setShowSettings(false);
+      setShowProfile(false); setShowBlocked(false); setShowQR(false);
+      setShowTools(false); setShowCustomize(false); setShowScheduled(false);
+      setShowDashboard(false); setShowWhatsNew(false); setShowFriendRequests(false);
+      setShowDeviceSecurity(false); setShowFolderManager(false);
+    }},
+  ]);
+
+  // Friend request count
+  useEffect(() => {
+    if (!profile) return;
+    const loadCount = async () => {
+      const { count } = await supabase.from('friend_requests')
+        .select('*', { count: 'exact', head: true })
+        .eq('receiver_id', profile.id)
+        .eq('status', 'pending');
+      setFriendRequestCount(count ?? 0);
+    };
+    loadCount();
+    const interval = setInterval(loadCount, 30000);
+    return () => clearInterval(interval);
+  }, [profile]);
 
   const loadConversations = useCallback(async () => {
     if (!profile) return;
@@ -208,12 +290,9 @@ function ChatApp() {
         const updated = payload.new as Message;
         setMessages((prev) => prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m)));
       })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'message_reactions', filter: `message_id=in.(${messages.map(m => m.id).join(',') || '00000000-0000-0000-0000-000000000000'})` }, () => {
-        loadMessages();
-      })
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [activeId, profile, messages.length, loadMessages]);
+  }, [activeId, profile]);
 
   // Real-time: typing
   useEffect(() => {
@@ -257,6 +336,59 @@ function ChatApp() {
     if (!('Notification' in window)) return;
     if (Notification.permission === 'default') Notification.requestPermission();
   }, []);
+
+  // Reminder checker
+  useEffect(() => {
+    if (!profile) return;
+    const checkReminders = async () => {
+      const now = new Date().toISOString();
+      const { data: due } = await supabase.from('reminders')
+        .select('id, title')
+        .eq('user_id', profile.id)
+        .eq('completed', false)
+        .lte('remind_at', now)
+        .limit(5);
+      if (due && due.length) {
+        due.forEach((r) => {
+          if (Notification.permission === 'granted') {
+            new Notification('Reminder', { body: r.title });
+          }
+          toast(`Reminder: ${r.title}`, 'info');
+        });
+        await supabase.from('reminders').update({ completed: true }).in('id', due.map((r) => r.id));
+      }
+    };
+    const interval = setInterval(checkReminders, 30000);
+    return () => clearInterval(interval);
+  }, [profile, toast]);
+
+  // Scheduled message checker
+  useEffect(() => {
+    if (!profile) return;
+    const checkScheduled = async () => {
+      const now = new Date().toISOString();
+      const { data: due } = await supabase.from('scheduled_messages')
+        .select('id, conversation_id, text')
+        .eq('sender_id', profile.id)
+        .eq('sent', false)
+        .lte('scheduled_for', now)
+        .limit(5);
+      if (due && due.length) {
+        for (const s of due) {
+          await supabase.from('messages').insert({
+            conversation_id: s.conversation_id,
+            sender_id: profile.id,
+            text: s.text,
+          });
+          await supabase.from('scheduled_messages').update({ sent: true }).eq('id', s.id);
+        }
+        toast('Scheduled message sent', 'success');
+        loadConversations();
+      }
+    };
+    const interval = setInterval(checkScheduled, 30000);
+    return () => clearInterval(interval);
+  }, [profile, toast, loadConversations]);
 
   // Handlers
   const handleSendMessage = async (payload: { text?: string; mediaUrl?: string; mediaType?: string; mediaName?: string; replyToId?: string; duration?: number; forwardedFromId?: string; locationLat?: number; locationLng?: number; contactName?: string; contactPhone?: string }) => {
@@ -320,7 +452,6 @@ function ChatApp() {
 
   const handleReact = async (messageId: string, emoji: string) => {
     if (!profile) return;
-    // Toggle reaction
     const existing = messages.find((m) => m.id === messageId)?.reactions?.find((r) => r.user_id === profile.id);
     if (existing) {
       await supabase.from('message_reactions').delete().eq('message_id', messageId).eq('user_id', profile.id);
@@ -376,7 +507,6 @@ function ChatApp() {
   const handleClearChat = async () => {
     if (!profile || !activeId) return;
     if (!confirm('Clear all messages in this chat? This cannot be undone.')) return;
-    // Hide all messages for me
     const rows = messages.map((m) => ({ message_id: m.id, user_id: profile.id }));
     if (rows.length) await supabase.from('message_hidden').upsert(rows, { onConflict: 'message_id,user_id' });
     setMessages([]);
@@ -417,6 +547,10 @@ function ChatApp() {
     }
   }, [messages.length, profile, activeConversation, participants]);
 
+  if (showSplash) {
+    return <SplashScreen onComplete={() => { setShowSplash(false); sessionStorage.setItem('pulse-splash-seen', 'true'); }} />;
+  }
+
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-100 dark:bg-slate-900">
@@ -429,11 +563,20 @@ function ChatApp() {
     return <AuthPage />;
   }
 
+  if (showOnboarding) {
+    return <Onboarding onComplete={handleOnboardingComplete} />;
+  }
+
+  // Folder-filtered conversations for sidebar
+  const folderConversations = activeFolder
+    ? conversations // filtering by folder is handled inside Sidebar via the folder bar
+    : conversations;
+
   return (
     <div className="h-screen flex bg-slate-100 dark:bg-slate-900 overflow-hidden">
       <div className={`${activeId ? 'hidden md:flex' : 'flex'} w-full md:w-auto`}>
         <Sidebar
-          conversations={conversations}
+          conversations={folderConversations}
           activeId={activeId}
           loading={loadingConvos}
           onSelect={setActiveId}
@@ -442,6 +585,14 @@ function ChatApp() {
           onOpenSettings={() => setShowSettings(true)}
           onOpenProfile={() => setShowProfile(true)}
           onOpenStory={(uid) => setStoryUserId(uid)}
+          onOpenDashboard={() => setShowDashboard(true)}
+          onOpenFriendRequests={() => setShowFriendRequests(true)}
+          friendRequestCount={friendRequestCount}
+          activeFolder={activeFolder}
+          onSelectFolder={setActiveFolder}
+          onManageFolders={() => setShowFolderManager(true)}
+          onOpenQR={() => setShowQR(true)}
+          onOpenWhatsNew={() => setShowWhatsNew(true)}
         />
       </div>
       <div className={`${activeId ? 'flex' : 'hidden md:flex'} flex-1`}>
@@ -467,9 +618,13 @@ function ChatApp() {
           onExportChat={handleExportChat}
           onForward={(m) => setForwardMessage(m)}
           onCall={handleCall}
+          onOpenTools={() => setShowTools(true)}
+          onOpenCustomize={() => setShowCustomize(true)}
+          onOpenScheduled={() => setShowScheduled(true)}
         />
       </div>
 
+      {/* Modals */}
       {showProfile && <ProfileModal onClose={() => setShowProfile(false)} />}
       {showNewChat && (
         <NewChatModal
@@ -477,39 +632,65 @@ function ChatApp() {
           onChatCreated={(id) => { setShowNewChat(false); setActiveId(id); loadConversations(); }}
         />
       )}
-      {showSearch && (
-        <SearchModal
-          onClose={() => setShowSearch(false)}
-          onUserSelect={() => { setShowSearch(false); setShowNewChat(true); }}
-          onMessageSelect={(id) => { setShowSearch(false); setActiveId(id); }}
-        />
-      )}
-      {showSettings && (
-        <SettingsModal
-          onClose={() => setShowSettings(false)}
-          onEditProfile={() => { setShowSettings(false); setShowProfile(true); }}
-          onOpenBlocked={() => { setShowSettings(false); setShowBlocked(true); }}
-        />
-      )}
-      {showBlocked && <BlockedContactsModal onClose={() => setShowBlocked(false)} />}
-      {forwardMessage && (
-        <ForwardModal
-          message={forwardMessage}
-          onClose={() => setForwardMessage(null)}
-          onForwarded={(id) => { setForwardMessage(null); setActiveId(id); toast('Message forwarded', 'success'); }}
-        />
-      )}
-      {callState && (
-        <CallModal
-          conversation={callState.conversation}
-          callType={callState.type}
-          onClose={() => setCallState(null)}
-          participants={participants}
-        />
-      )}
-      {storyUserId && (
-        <StoryViewer userId={storyUserId} onClose={() => setStoryUserId(null)} />
-      )}
+      <Suspense fallback={<ModalFallback />}>
+        {showSearch && (
+          <SearchModal
+            onClose={() => setShowSearch(false)}
+            onUserSelect={() => { setShowSearch(false); setShowNewChat(true); }}
+            onMessageSelect={(id) => { setShowSearch(false); setActiveId(id); }}
+          />
+        )}
+        {showSettings && (
+          <SettingsModal
+            onClose={() => setShowSettings(false)}
+            onEditProfile={() => { setShowSettings(false); setShowProfile(true); }}
+            onOpenBlocked={() => { setShowSettings(false); setShowBlocked(true); }}
+            onOpenDeviceSecurity={() => { setShowSettings(false); setShowDeviceSecurity(true); }}
+          />
+        )}
+        {showBlocked && <BlockedContactsModal onClose={() => setShowBlocked(false)} />}
+        {forwardMessage && (
+          <ForwardModal
+            message={forwardMessage}
+            onClose={() => setForwardMessage(null)}
+            onForwarded={(id) => { setForwardMessage(null); setActiveId(id); toast('Message forwarded', 'success'); }}
+          />
+        )}
+        {callState && (
+          <CallModal
+            conversation={callState.conversation}
+            callType={callState.type}
+            onClose={() => setCallState(null)}
+            participants={participants}
+          />
+        )}
+        {storyUserId && <StoryViewer userId={storyUserId} onClose={() => setStoryUserId(null)} />}
+        {showQR && profile && <QRModal profile={profile} onClose={() => setShowQR(false)} />}
+        {showTools && activeId && (
+          <ChatToolsModal conversationId={activeId} participants={participants} onClose={() => setShowTools(false)} />
+        )}
+        {showCustomize && activeId && <ChatCustomizeModal conversationId={activeId} onClose={() => setShowCustomize(false)} />}
+        {showScheduled && activeId && (
+          <ScheduledMessagesModal conversationId={activeId} onClose={() => setShowScheduled(false)} onSendNow={() => loadMessages()} />
+        )}
+        {showDashboard && (
+          <DashboardModal conversations={conversations} participants={participants} onClose={() => setShowDashboard(false)} />
+        )}
+        {showWhatsNew && <WhatsNewModal onClose={() => setShowWhatsNew(false)} />}
+        {showFriendRequests && (
+          <FriendRequestsModal onClose={() => setShowFriendRequests(false)} onAccept={() => loadConversations()} />
+        )}
+        {showDeviceSecurity && <DeviceSecurityModal onClose={() => setShowDeviceSecurity(false)} />}
+        {showFolderManager && (
+          <FolderManager
+            conversations={conversations.map((c) => ({
+              id: c.id,
+              name: c.is_self ? 'Message Yourself' : c.is_group ? (c.name ?? 'Group') : (c.participants.find((p) => p.id !== profile?.id)?.full_name ?? 'Unknown'),
+            }))}
+            onClose={() => setShowFolderManager(false)}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }
@@ -517,11 +698,13 @@ function ChatApp() {
 export default function App() {
   return (
     <ThemeProvider>
-      <ToastProvider>
-        <AuthProvider>
-          <ChatApp />
-        </AuthProvider>
-      </ToastProvider>
+      <AccessibilityProvider>
+        <ToastProvider>
+          <AuthProvider>
+            <ChatApp />
+          </AuthProvider>
+        </ToastProvider>
+      </AccessibilityProvider>
     </ThemeProvider>
   );
 }

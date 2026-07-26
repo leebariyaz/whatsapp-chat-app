@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, User, Lock, Bell, Palette, HardDrive, HelpCircle, Shield, ChevronRight, LogOut, Moon, Sun, Monitor, Check, Trash2, Mail, Phone, AtSign, Loader2 } from 'lucide-react';
+import { X, User, Lock, Bell, Palette, HardDrive, HelpCircle, Shield, ChevronRight, LogOut, Moon, Sun, Monitor, Check, Trash2, Mail, Phone, AtSign, Loader2, KeyRound, Fingerprint, Plane, Eye, Type, Accessibility } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { useToast } from '@/context/ToastContext';
+import { useAccessibility } from '@/context/AccessibilityContext';
 import { supabase } from '@/lib/supabase';
 import type { UserSettings } from '@/types';
 import Avatar from '@/components/Avatar';
@@ -11,14 +12,16 @@ interface SettingsModalProps {
   onClose: () => void;
   onEditProfile: () => void;
   onOpenBlocked: () => void;
+  onOpenDeviceSecurity: () => void;
 }
 
-type Section = 'main' | 'account' | 'privacy' | 'chats' | 'notifications' | 'appearance' | 'storage' | 'help';
+type Section = 'main' | 'account' | 'privacy' | 'chats' | 'notifications' | 'appearance' | 'storage' | 'help' | 'security' | 'accessibility';
 
-export default function SettingsModal({ onClose, onEditProfile, onOpenBlocked }: SettingsModalProps) {
+export default function SettingsModal({ onClose, onEditProfile, onOpenBlocked, onOpenDeviceSecurity }: SettingsModalProps) {
   const { profile, signOut, refreshProfile } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { toast } = useToast();
+  const { highContrast, dyslexiaFont, largeText, toggleHighContrast, toggleDyslexiaFont, toggleLargeText } = useAccessibility();
   const [section, setSection] = useState<Section>('main');
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [loadingSettings, setLoadingSettings] = useState(true);
@@ -45,9 +48,11 @@ export default function SettingsModal({ onClose, onEditProfile, onOpenBlocked }:
   const menuItems = [
     { key: 'account' as const, label: 'Account', icon: <User className="w-5 h-5" />, desc: 'Edit profile, change username, email, password' },
     { key: 'privacy' as const, label: 'Privacy', icon: <Shield className="w-5 h-5" />, desc: 'Last seen, blocked contacts, read receipts' },
+    { key: 'security' as const, label: 'Security', icon: <KeyRound className="w-5 h-5" />, desc: 'Chat lock, device sessions, login history' },
     { key: 'chats' as const, label: 'Chats', icon: <Palette className="w-5 h-5" />, desc: 'Wallpaper, font size, media download' },
     { key: 'notifications' as const, label: 'Notifications', icon: <Bell className="w-5 h-5" />, desc: 'Sounds, vibration, preview' },
     { key: 'appearance' as const, label: 'Appearance', icon: <Monitor className="w-5 h-5" />, desc: 'Theme, accent colors, font size' },
+    { key: 'accessibility' as const, label: 'Accessibility', icon: <Accessibility className="w-5 h-5" />, desc: 'High contrast, dyslexia font, large text' },
     { key: 'storage' as const, label: 'Storage', icon: <HardDrive className="w-5 h-5" />, desc: 'Manage downloads, clear cache' },
     { key: 'help' as const, label: 'Help', icon: <HelpCircle className="w-5 h-5" />, desc: 'FAQ, support, terms' },
   ];
@@ -155,8 +160,49 @@ export default function SettingsModal({ onClose, onEditProfile, onOpenBlocked }:
                   <ToggleRow label="Read Receipts" desc="Show blue ticks" checked={settings?.read_receipts ?? true} onChange={(v) => updateSetting('read_receipts', v)} />
                   <ToggleRow label="Typing Indicator" desc="Show when you're typing" checked={settings?.typing_visible ?? true} onChange={(v) => updateSetting('typing_visible', v)} />
                   <ToggleRow label="Two-Factor Auth" desc="Extra security" checked={settings?.two_factor_enabled ?? false} onChange={(v) => updateSetting('two_factor_enabled', v)} />
+                  <div className="pt-3 mt-2 border-t border-slate-100 dark:border-slate-700">
+                    <ToggleRow label="Away Mode" desc="Auto-reply when unavailable" checked={settings?.away_mode_enabled ?? false} onChange={(v) => updateSetting('away_mode_enabled', v)} />
+                    {(settings?.away_mode_enabled) && (
+                      <div className="px-3 pb-2">
+                        <textarea value={settings?.away_message ?? ''} onChange={(e) => updateSetting('away_message', e.target.value)} placeholder="I'm currently unavailable and will reply later." rows={2} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm focus:outline-none focus:border-teal-400 resize-none" />
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
+            </div>
+          )}
+
+          {section === 'security' && (
+            <div className="p-4 space-y-1">
+              <button onClick={onOpenDeviceSecurity} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition text-left mb-2">
+                <KeyRound className="w-5 h-5 text-blue-500" />
+                <span className="flex-1 text-slate-700 dark:text-slate-200">Device Sessions & Login History</span>
+                <ChevronRight className="w-4 h-4 text-slate-300" />
+              </button>
+              {loadingSettings ? <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 text-slate-400 animate-spin" /></div> : (
+                <>
+                  <ToggleRow label="Chat Lock" desc="Require PIN to open locked chats" checked={settings?.chat_lock_enabled ?? false} onChange={(v) => updateSetting('chat_lock_enabled', v)} />
+                  {(settings?.chat_lock_enabled) && (
+                    <div className="px-3 pb-2">
+                      <input type="password" value={settings?.chat_lock_pin ?? ''} onChange={(e) => updateSetting('chat_lock_pin', e.target.value)} placeholder="Set a 4-digit PIN" maxLength={4} className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-800 dark:text-white text-sm focus:outline-none focus:border-teal-400" />
+                      <p className="text-xs text-slate-400 mt-1 flex items-center gap-1"><Fingerprint className="w-3 h-3" /> Biometric authentication will be used where available</p>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {section === 'accessibility' && (
+            <div className="p-4 space-y-1">
+              <ToggleRow label="High Contrast" desc="Increase visual contrast" checked={highContrast} onChange={toggleHighContrast} />
+              <ToggleRow label="Dyslexia-Friendly Font" desc="Use accessible typography" checked={dyslexiaFont} onChange={toggleDyslexiaFont} />
+              <ToggleRow label="Larger Text" desc="Increase font size throughout" checked={largeText} onChange={toggleLargeText} />
+              <div className="pt-3 mt-2 border-t border-slate-100 dark:border-slate-700">
+                <p className="text-xs text-slate-400 px-3 py-2 flex items-center gap-1.5"><Eye className="w-3 h-3" /> Screen reader support is enabled by default</p>
+                <p className="text-xs text-slate-400 px-3 py-1 flex items-center gap-1.5"><Type className="w-3 h-3" /> Keyboard shortcuts: Ctrl+K (search), Ctrl+N (new chat), Esc (close)</p>
+              </div>
             </div>
           )}
 

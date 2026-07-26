@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react';
 import { Reply, Edit2, Trash2, Copy, Check, CheckCheck, Download, FileText, MoreVertical, X, Star, Forward, MapPin, Phone, Mic, Play, Video, File } from 'lucide-react';
 import type { Message, Profile, MessageReaction } from '@/types';
 import { formatTime } from '@/utils';
+import { formatMessage } from '@/lib/messageFormat';
+import { useLinkPreview, LinkPreviewCard } from '@/lib/linkPreview';
 import Avatar from '@/components/Avatar';
 
 interface MessageBubbleProps {
@@ -30,6 +32,7 @@ export default function MessageBubble({
   const [showReactions, setShowReactions] = useState(false);
   const [copied, setCopied] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const linkPreview = useLinkPreview(message.text);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -161,7 +164,10 @@ export default function MessageBubble({
               </div>
             </div>
           ) : (
-            <p className="whitespace-pre-wrap break-words">{message.text}</p>
+            <>
+              <div className="whitespace-pre-wrap break-words">{formatMessage(message.text ?? '')}</div>
+              {linkPreview && <LinkPreviewCard preview={linkPreview} />}
+            </>
           )}
 
           {/* Footer: time + receipts + star */}

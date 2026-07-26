@@ -1,11 +1,13 @@
 import { useState } from 'react';
-import { Search, Plus, Pin, MessageCircle, Loader2, MoreVertical, LogOut, Moon, Sun, User, Settings as SettingsIcon, Archive, Star, BellOff, Check, CheckCheck } from 'lucide-react';
+import { Search, Plus, Pin, MessageCircle, Loader2, MoreVertical, LogOut, Moon, Sun, User, Settings as SettingsIcon, Archive, Star, BellOff, Check, CheckCheck, LayoutDashboard, Users, Sparkles, QrCode } from 'lucide-react';
 import type { Conversation } from '@/types';
 import { formatRelative } from '@/utils';
 import Avatar from '@/components/Avatar';
 import { useAuth } from '@/context/AuthContext';
 import { useTheme } from '@/context/ThemeContext';
 import { StoriesBar } from '@/components/Stories';
+import { FolderBar } from '@/components/ChatFolders';
+import Logo from '@/components/Logo';
 
 interface SidebarProps {
   conversations: Conversation[];
@@ -17,9 +19,17 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenProfile: () => void;
   onOpenStory: (userId: string) => void;
+  onOpenDashboard: () => void;
+  onOpenFriendRequests: () => void;
+  friendRequestCount: number;
+  activeFolder: string | null;
+  onSelectFolder: (id: string | null) => void;
+  onManageFolders: () => void;
+  onOpenQR: () => void;
+  onOpenWhatsNew: () => void;
 }
 
-export default function Sidebar({ conversations, activeId, loading, onSelect, onNewChat, onOpenSearch, onOpenSettings, onOpenProfile, onOpenStory }: SidebarProps) {
+export default function Sidebar({ conversations, activeId, loading, onSelect, onNewChat, onOpenSearch, onOpenSettings, onOpenProfile, onOpenStory, onOpenDashboard, onOpenFriendRequests, friendRequestCount, activeFolder, onSelectFolder, onManageFolders, onOpenQR, onOpenWhatsNew }: SidebarProps) {
   const { profile, signOut } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const [query, setQuery] = useState('');
@@ -50,12 +60,12 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-700 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-emerald-500 flex items-center justify-center">
-            <MessageCircle className="w-5 h-5 text-white" />
-          </div>
-          <h1 className="text-lg font-semibold text-slate-800 dark:text-white">ChatWave</h1>
+          <Logo size="md" showText />
         </div>
         <div className="flex items-center gap-1">
+          <button onClick={onOpenQR} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300" title="QR Code">
+            <QrCode className="w-5 h-5" />
+          </button>
           <button onClick={onOpenSearch} className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-300">
             <Search className="w-5 h-5" />
           </button>
@@ -66,9 +76,18 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-                <div className="absolute right-0 top-full mt-1 z-20 w-48 bg-white dark:bg-slate-700 rounded-xl shadow-lg border border-slate-100 dark:border-slate-600 py-1">
+                <div className="absolute right-0 top-full mt-1 z-20 w-56 bg-white dark:bg-slate-700 rounded-xl shadow-lg border border-slate-100 dark:border-slate-600 py-1">
                   <button onClick={() => { setMenuOpen(false); onOpenProfile(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600">
                     <User className="w-4 h-4" /> Profile
+                  </button>
+                  <button onClick={() => { setMenuOpen(false); onOpenDashboard(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600">
+                    <LayoutDashboard className="w-4 h-4" /> Dashboard
+                  </button>
+                  <button onClick={() => { setMenuOpen(false); onOpenFriendRequests(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600">
+                    <Users className="w-4 h-4" /> Friend Requests {friendRequestCount > 0 && <span className="ml-auto px-1.5 py-0.5 rounded-full bg-teal-500 text-white text-xs">{friendRequestCount}</span>}
+                  </button>
+                  <button onClick={() => { setMenuOpen(false); onOpenWhatsNew(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600">
+                    <Sparkles className="w-4 h-4" /> What's New
                   </button>
                   <button onClick={() => { setMenuOpen(false); onOpenSettings(); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600">
                     <SettingsIcon className="w-4 h-4" /> Settings
@@ -90,6 +109,9 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
 
       {/* Stories */}
       <StoriesBar onOpenStory={onOpenStory} />
+
+      {/* Folders */}
+      <FolderBar activeFolder={activeFolder} onSelectFolder={onSelectFolder} onManageFolders={onManageFolders} />
 
       {/* Search */}
       <div className="px-4 py-3">

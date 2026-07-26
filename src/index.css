@@ -50,3 +50,59 @@ body {
 .animate-fade-in {
   animation: fade-in 0.2s ease-out;
 }
+
+/* Accessibility: High contrast mode */
+.high-contrast {
+  --hc-bg: #000000;
+  --hc-fg: #ffffff;
+  --hc-border: #ffffff;
+}
+.high-contrast .dark\:bg-slate-800 { background-color: #000 !important; }
+.high-contrast .dark\:bg-slate-700 { background-color: #111 !important; }
+.high-contrast .dark\:bg-slate-900 { background-color: #000 !important; }
+.high-contrast .dark\:text-white { color: #fff !important; }
+.high-contrast .dark\:text-slate-200 { color: #fff !important; }
+.high-contrast .dark\:text-slate-300 { color: #eee !important; }
+.high-contrast .dark\:border-slate-700 { border-color: #fff !important; }
+.high-contrast .dark\:border-slate-600 { border-color: #aaa !important; }
+.high-contrast button:focus-visible, .high-contrast a:focus-visible, .high-contrast input:focus-visible {
+  outline: 3px solid #ffff00 !important;
+  outline-offset: 2px !important;
+}
+
+/* Accessibility: Dyslexia-friendly font */
+.dyslexia-font body, .dyslexia-font input, .dyslexia-font textarea, .dyslexia-font button {
+  font-family: 'Open Dyslexic', 'Comic Sans MS', sans-serif !important;
+  letter-spacing: 0.05em !important;
+  word-spacing: 0.1em !important;
+  line-height: 1.6 !important;
+}
+
+/* Accessibility: Large text mode */
+.large-text {
+  font-size: 1.15rem !important;
+}
+.large-text .text-xs { font-size: 0.9rem !important; }
+.large-text .text-sm { font-size: 1.05rem !important; }
+.large-text .text-base { font-size: 1.2rem !important; }
+.large-text .text-lg { font-size: 1.4rem !important; }
+.large-text .text-xl { font-size: 1.6rem !important; }
+
+/* Focus visible for keyboard navigation */
+button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: 2px solid #14b8a6;
+  outline-offset: 2px;
+}
+
+/* Screen reader only text */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
