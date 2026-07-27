@@ -35,12 +35,13 @@ export default function SettingsModal({ onClose, onEditProfile, onOpenBlocked, o
   }, [profile]);
 
   const updateSetting = async (key: keyof UserSettings, value: string | boolean) => {
-    if (!profile || !settings) return;
-    const updated = { ...settings, [key]: value };
+    if (!profile) return;
+    const updated = { ...(settings ?? { user_id: profile.id } as UserSettings), [key]: value };
     setSettings(updated);
-    const { [key]: _removed, ...rest } = updated;
-    void _removed; void rest;
-    await supabase.from('user_settings').update({ [key]: value, updated_at: new Date().toISOString() }).eq('user_id', profile.id);
+    await supabase.from('user_settings').upsert(
+      { user_id: profile.id, [key]: value, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
   };
 
   if (!profile) return null;

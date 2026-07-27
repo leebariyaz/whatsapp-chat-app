@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Create Message Yourself conversation
     const { data: selfConvo, error: convoErr } = await supabase
       .from('conversations')
-      .insert({ is_group: false })
+      .insert({ is_group: false, created_by: userId })
       .select('id')
       .single();
     if (convoErr) { console.error('Failed to create self conversation', convoErr); return; }
@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Create AI assistant conversation
     const { data: aiConvo, error: aiConvoErr } = await supabase
       .from('conversations')
-      .insert({ is_group: false })
+      .insert({ is_group: false, created_by: userId })
       .select('id')
       .single();
     if (aiConvoErr) { console.error('Failed to create AI conversation', aiConvoErr); return; }

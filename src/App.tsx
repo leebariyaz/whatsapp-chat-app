@@ -107,7 +107,7 @@ function ChatApp() {
     }},
   ]);
 
-  // Friend request count
+  // Friend request count (real-time + polling fallback)
   useEffect(() => {
     if (!profile) return;
     const loadCount = async () => {
@@ -118,8 +118,12 @@ function ChatApp() {
       setFriendRequestCount(count ?? 0);
     };
     loadCount();
+    const channel = supabase
+      .channel('friend-requests')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${profile.id}` }, () => loadCount())
+      .subscribe();
     const interval = setInterval(loadCount, 30000);
-    return () => clearInterval(interval);
+    return () => { supabase.removeChannel(channel); clearInterval(interval); };
   }, [profile]);
 
   const loadConversations = useCallback(async () => {

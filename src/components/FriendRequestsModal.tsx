@@ -37,11 +37,13 @@ export default function FriendRequestsModal({ onClose, onAccept }: FriendRequest
     if (!profile) return;
     setProcessing(req.id);
     try {
-      await supabase.from('friend_requests').update({ status: 'accepted', responded_at: new Date().toISOString() }).eq('id', req.id);
-      await supabase.from('friends').insert([
+      const { error: updateErr } = await supabase.from('friend_requests').update({ status: 'accepted', responded_at: new Date().toISOString() }).eq('id', req.id);
+      if (updateErr) throw updateErr;
+      const { error: friendErr } = await supabase.from('friends').upsert([
         { user_id: profile.id, friend_id: req.sender_id },
         { user_id: req.sender_id, friend_id: profile.id },
-      ]);
+      ], { onConflict: 'user_id,friend_id' });
+      if (friendErr) throw friendErr;
       setRequests((prev) => prev.filter((r) => r.id !== req.id));
       toast('Friend request accepted', 'success');
       onAccept(req.sender_id);
@@ -114,8 +116,20 @@ export async function checkFriendship(userId: string, otherId: string): Promise<
   return !!data;
 }
 
-// Send a friend request
+// Send a friend request (prevents duplicates)
 export async function sendFriendRequest(senderId: string, receiverId: string): Promise<{ success: boolean; error?: string }> {
+  // Check if already friends
+  const { data: existingFriend } = await supabase.from('friends').select('user_id').eq('user_id', senderId).eq('friend_id', receiverId).maybeSingle();
+  if (existingFriend) return { success: false, error: 'You are already friends' };
+
+  // Check for existing pending request (either direction)
+  const { data: existingReq } = await supabase.from('friend_requests')
+    .select('id, status')
+    .or(`and(sender_id.eq.${senderId},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${senderId})}`)
+    .eq('status', 'pending')
+    .maybeSingle();
+  if (existingReq) return { success: false, error: 'A pending request already exists' };
+
   const { error } = await supabase.from('friend_requests').insert({ sender_id: senderId, receiver_id: receiverId });
   if (error) return { success: false, error: error.message };
   return { success: true };

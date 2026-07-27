@@ -77,7 +77,7 @@ export default function NewChatModal({ onClose, onChatCreated }: NewChatModalPro
       // Create new conversation
       const { data: convo, error: convoErr } = await supabase
         .from('conversations')
-        .insert({ is_group: false })
+        .insert({ is_group: false, created_by: profile.id })
         .select('id')
         .single();
       if (convoErr) throw convoErr;
