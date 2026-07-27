@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Search, Plus, Pin, MessageCircle, Loader2, MoreVertical, LogOut, Moon, Sun, User, Settings as SettingsIcon, Archive, Star, BellOff, Check, CheckCheck, LayoutDashboard, Users, Sparkles, QrCode } from 'lucide-react';
 import type { Conversation } from '@/types';
 import { AI_ASSISTANT_ID } from '@/types';
+import { isMockUserOnline } from '@/mockData';
 import { formatRelative } from '@/utils';
 import Avatar from '@/components/Avatar';
 import { useAuth } from '@/context/AuthContext';
@@ -196,7 +197,7 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
                   : 'border-transparent hover:bg-slate-50 dark:hover:bg-slate-700/50'
               }`}
             >
-              <Avatar src={other?.avatar_url} name={other?.full_name ?? 'Unknown'} id={other?.id ?? 'x'} size="md" verified={other?.is_verified} />
+              <Avatar src={other?.avatar_url} name={other?.full_name ?? 'Unknown'} id={other?.id ?? 'x'} size="md" verified={other?.is_verified} online={other?.id.startsWith('mock-') ? isMockUserOnline(other.id) : undefined} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5 min-w-0">

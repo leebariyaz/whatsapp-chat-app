@@ -320,24 +320,30 @@ export default function ChatArea({
             <p className="text-slate-400 text-sm">No messages yet. Say hello!</p>
           </div>
         )}
-        {messages.map((m) => (
-          <MessageBubble
-            key={m.id}
-            message={m}
-            sender={participants[m.sender_id]}
-            isMine={m.sender_id === profile?.id}
-            isGroup={isGroup}
-            replyTo={messages.find((x) => x.id === m.reply_to_id)}
-            onReply={(msg) => setReplyTo(msg)}
-            onEdit={(msg) => { setEditing(msg); setText(msg.text ?? ''); }}
-            onDeleteForMe={onDeleteForMe}
-            onDeleteForEveryone={onDeleteForEveryone}
-            onCopy={handleCopy}
-            onReact={onReact}
-            onStar={onStar}
-            onForward={onForward}
-          />
-        ))}
+        {messages.map((m, idx) => {
+          const prevMsg = idx > 0 ? messages[idx - 1] : null;
+          const showDateSep = !prevMsg || new Date(prevMsg.created_at).toDateString() !== new Date(m.created_at).toDateString();
+          return (
+            <div key={m.id}>
+              {showDateSep && <DateSeparator ts={m.created_at} />}
+              <MessageBubble
+                message={m}
+                sender={participants[m.sender_id]}
+                isMine={m.sender_id === profile?.id}
+                isGroup={isGroup}
+                replyTo={messages.find((x) => x.id === m.reply_to_id)}
+                onReply={(msg) => setReplyTo(msg)}
+                onEdit={(msg) => { setEditing(msg); setText(msg.text ?? ''); }}
+                onDeleteForMe={onDeleteForMe}
+                onDeleteForEveryone={onDeleteForEveryone}
+                onCopy={handleCopy}
+                onReact={onReact}
+                onStar={onStar}
+                onForward={onForward}
+              />
+            </div>
+          );
+        })}
 
         {/* AI typing indicator */}
         {aiThinking && (
@@ -437,6 +443,24 @@ export default function ChatArea({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function DateSeparator({ ts }: { ts: string }) {
+  const date = new Date(ts);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  let label: string;
+  if (date.toDateString() === today.toDateString()) label = 'Today';
+  else if (date.toDateString() === yesterday.toDateString()) label = 'Yesterday';
+  else label = date.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+  return (
+    <div className="flex justify-center my-3">
+      <span className="px-3 py-1 rounded-full bg-slate-200/80 dark:bg-slate-700/80 text-xs font-medium text-slate-500 dark:text-slate-400 shadow-sm">
+        {label}
+      </span>
     </div>
   );
 }

@@ -14,6 +14,9 @@ import { supabase } from '@/lib/supabase';
 import { useKeyboardShortcuts } from '@/lib/keyboard';
 import type { Conversation, Message, Profile } from '@/types';
 import { AI_ASSISTANT_ID } from '@/types';
+import { getMockConversations, getMockMessages, MOCK_PROFILES, MOCK_TYPING_USERS, isMockUserOnline } from '@/mockData';
+
+const USE_MOCK_DATA = true;
 
 // Lazy-loaded modals (code splitting)
 const SearchModal = lazy(() => import('@/components/SearchModal'));
@@ -196,7 +199,16 @@ function ChatApp() {
         });
       }
 
-      setConversations(convoList);
+      // Merge mock conversations with real ones
+      if (USE_MOCK_DATA) {
+        const mockConvos = getMockConversations(profile.id);
+        const mockProfMap: Record<string, Profile> = {};
+        mockConvos.forEach((c) => c.participants.forEach((p) => { mockProfMap[p.id] = p; }));
+        setParticipants((prev) => ({ ...prev, ...mockProfMap }));
+        setConversations([...mockConvos, ...convoList]);
+      } else {
+        setConversations(convoList);
+      }
 
       const { data: allProfs } = await supabase
         .from('profiles')
@@ -246,6 +258,13 @@ function ChatApp() {
 
   const loadMessages = useCallback(async () => {
     if (!activeId || !profile) return;
+    // Load mock messages for mock conversations
+    if (USE_MOCK_DATA && activeId.startsWith('mock-')) {
+      const mockMsgs = getMockMessages(activeId, profile.id);
+      setMessages(mockMsgs ?? []);
+      setLoadingMessages(false);
+      return;
+    }
     setLoadingMessages(true);
     try {
       const { data, error } = await supabase
@@ -332,6 +351,18 @@ function ChatApp() {
   // Real-time: typing
   useEffect(() => {
     if (!activeId || !profile) return;
+    // Mock typing indicator for mock conversations
+    if (USE_MOCK_DATA && activeId.startsWith('mock-')) {
+      const convo = conversations.find((c) => c.id === activeId);
+      const otherId = convo?.participants.find((p) => p.id !== profile.id)?.id;
+      if (otherId && MOCK_TYPING_USERS.includes(otherId)) {
+        setTypingUserIds([otherId]);
+        const t = setTimeout(() => setTypingUserIds([]), 4000);
+        return () => clearTimeout(t);
+      }
+      setTypingUserIds([]);
+      return;
+    }
     const channel = supabase
       .channel(`typing:${activeId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'typing_status', filter: `conversation_id=eq.${activeId}` }, (payload) => {
@@ -454,7 +485,25 @@ function ChatApp() {
     const convo = conversations.find((c) => c.id === activeId);
     const isAiConvo = convo?.participants.some((p) => p.id === AI_ASSISTANT_ID);
     if (isAiConvo && payload.text) {
-      triggerAiResponse(activeId);
+      // For mock AI conversation, use the real DB AI response
+      if (USE_MOCK_DATA && activeId.startsWith('mock-')) {
+        setAiThinking(true);
+        setAiError(null);
+        // Simulate AI thinking then add a mock response
+        setTimeout(() => {
+          const aiMsg: Message = {
+            id: `mock-ai-${Date.now()}`,
+            conversation_id: activeId,
+            sender_id: AI_ASSISTANT_ID,
+            text: 'That\'s a great question! I\'m your Pulse Assistant. I can help you discover features, answer questions about the app, and provide tips. Try asking me about messaging, groups, stories, or settings! 😊',
+            media_url: null, media_type: null, media_name: null, reply_to_id: null, edited_at: null, deleted_for_everyone: false, created_at: new Date().toISOString(), forwarded_from_id: null, duration: null, location_lat: null, location_lng: null, contact_name: null, contact_phone: null, read_by: [], reactions: [],
+          };
+          setMessages((prev) => [...prev, aiMsg]);
+          setAiThinking(false);
+        }, 1500);
+      } else {
+        triggerAiResponse(activeId);
+      }
     }
   };
 
