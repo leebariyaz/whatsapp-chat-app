@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Search, Plus, Pin, MessageCircle, Loader2, MoreVertical, LogOut, Moon, Sun, User, Settings as SettingsIcon, Archive, Star, BellOff, Check, CheckCheck, LayoutDashboard, Users, Sparkles, QrCode } from 'lucide-react';
 import type { Conversation } from '@/types';
+import { AI_ASSISTANT_ID } from '@/types';
 import { formatRelative } from '@/utils';
 import Avatar from '@/components/Avatar';
 import { useAuth } from '@/context/AuthContext';
@@ -161,6 +162,7 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
 
         {!loading && sorted.map((c) => {
           const other = c.participants.find((p) => p.id !== profile?.id) ?? c.participants[0];
+          const isAiConvo = c.participants.some((p) => p.id === AI_ASSISTANT_ID);
           const last = c.last_message;
           const isActive = c.id === activeId;
           const preview = last
@@ -202,6 +204,7 @@ export default function Sidebar({ conversations, activeId, loading, onSelect, on
                     {c.muted && <BellOff className="w-3 h-3 text-slate-400 shrink-0" />}
                     <span className="font-medium text-slate-800 dark:text-white truncate">
                       {c.is_self ? 'Message Yourself' : c.is_group ? (c.name ?? 'Group') : other?.full_name ?? 'Unknown'}
+                      {isAiConvo && <Sparkles className="inline-block w-3.5 h-3.5 ml-1.5 text-violet-500\" />}
                     </span>
                   </div>
                   {last && (

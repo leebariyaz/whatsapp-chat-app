@@ -13,6 +13,7 @@ import { AccessibilityProvider } from '@/context/AccessibilityContext';
 import { supabase } from '@/lib/supabase';
 import { useKeyboardShortcuts } from '@/lib/keyboard';
 import type { Conversation, Message, Profile } from '@/types';
+import { AI_ASSISTANT_ID } from '@/types';
 
 // Lazy-loaded modals (code splitting)
 const SearchModal = lazy(() => import('@/components/SearchModal'));
@@ -44,6 +45,8 @@ function ChatApp() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [participants, setParticipants] = useState<Record<string, Profile>>({});
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
+  const [aiThinking, setAiThinking] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   // Modal states
   const [showProfile, setShowProfile] = useState(false);
@@ -212,6 +215,34 @@ function ChatApp() {
   useEffect(() => {
     if (profile) loadConversations();
   }, [profile, loadConversations]);
+
+  // Ensure every user has an AI assistant conversation
+  useEffect(() => {
+    if (!profile || !conversations.length) return;
+    const hasAiConvo = conversations.some((c) => c.participants.some((p) => p.id === AI_ASSISTANT_ID));
+    if (hasAiConvo) return;
+    (async () => {
+      try {
+        const { data: convo, error: convoErr } = await supabase
+          .from('conversations')
+          .insert({ is_group: false, created_by: profile.id })
+          .select('id')
+          .single();
+        if (convoErr) throw convoErr;
+        const { error: partErr } = await supabase
+          .from('conversation_participants')
+          .insert([
+            { conversation_id: convo.id, user_id: profile.id, pinned: true },
+            { conversation_id: convo.id, user_id: AI_ASSISTANT_ID },
+          ]);
+        if (partErr) throw partErr;
+        await supabase.rpc('create_ai_welcome_message', { p_conversation_id: convo.id, p_user_name: profile.full_name });
+        loadConversations();
+      } catch (err) {
+        console.error('Failed to create AI conversation', err);
+      }
+    })();
+  }, [profile, conversations, loadConversations]);
 
   const loadMessages = useCallback(async () => {
     if (!activeId || !profile) return;
@@ -418,6 +449,37 @@ function ChatApp() {
       .single();
     if (error) { console.error('Send failed', error); toast('Failed to send message', 'error'); return; }
     setMessages((prev) => [...prev, { ...(data as Message), read_by: [], reactions: [] }]);
+
+    // If this is an AI conversation, trigger the AI response
+    const convo = conversations.find((c) => c.id === activeId);
+    const isAiConvo = convo?.participants.some((p) => p.id === AI_ASSISTANT_ID);
+    if (isAiConvo && payload.text) {
+      triggerAiResponse(activeId);
+    }
+  };
+
+  const triggerAiResponse = async (conversationId: string) => {
+    if (!profile) return;
+    setAiThinking(true);
+    setAiError(null);
+    try {
+      const { data: savedMsg, error } = await supabase
+        .rpc('generate_ai_response', { p_conversation_id: conversationId, p_user_id: profile.id });
+
+      if (error) throw error;
+      if (savedMsg) {
+        const aiMsg = savedMsg as Message;
+        setMessages((prev) => {
+          if (prev.find((m) => m.id === aiMsg.id)) return prev;
+          return [...prev, { ...aiMsg, read_by: [], reactions: [] }];
+        });
+      }
+    } catch (err) {
+      console.error('AI response failed', err);
+      setAiError('The assistant is having trouble responding. Please try again.');
+    } finally {
+      setAiThinking(false);
+    }
   };
 
   const handleEditMessage = async (message: Message, newText: string) => {
@@ -625,6 +687,9 @@ function ChatApp() {
           onOpenTools={() => setShowTools(true)}
           onOpenCustomize={() => setShowCustomize(true)}
           onOpenScheduled={() => setShowScheduled(true)}
+          aiThinking={aiThinking}
+          aiError={aiError}
+          onRetryAi={() => activeId && triggerAiResponse(activeId)}
         />
       </div>
 

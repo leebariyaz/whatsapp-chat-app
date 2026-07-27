@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Paperclip, Smile, Image as ImageIcon, FileText, Loader2, ArrowLeft, Phone, Video, Mic, MapPin, Contact, Star, Trash2, Archive, BellOff, Pin, Download, X, Bold, Italic, Code, List, ListOrdered, Strikethrough, Wrench, Palette, Clock } from 'lucide-react';
+import { Send, Paperclip, Smile, Image as ImageIcon, FileText, Loader2, ArrowLeft, Phone, Video, Mic, MapPin, Contact, Star, Trash2, Archive, BellOff, Pin, Download, X, Bold, Italic, Code, List, ListOrdered, Strikethrough, Wrench, Palette, Clock, Sparkles, AlertCircle, RotateCcw } from 'lucide-react';
 import type { Conversation, Message, Profile } from '@/types';
+import { AI_ASSISTANT_ID } from '@/types';
 import { formatLastSeen } from '@/utils';
 import Avatar from '@/components/Avatar';
 import MessageBubble, { ReplyPreviewBar } from '@/components/MessageBubble';
@@ -34,12 +35,16 @@ interface ChatAreaProps {
   onOpenTools: () => void;
   onOpenCustomize: () => void;
   onOpenScheduled: () => void;
+  aiThinking?: boolean;
+  aiError?: string | null;
+  onRetryAi?: () => void;
 }
 
 export default function ChatArea({
   conversation, messages, loadingMessages, participants, typingUserIds,
   onBack, onSendMessage, onEditMessage, onDeleteForMe, onDeleteForEveryone, onMarkRead, onSetTyping,
   onReact, onStar, onTogglePin, onToggleMute, onToggleArchive, onClearChat, onExportChat, onForward, onCall, onOpenTools, onOpenCustomize, onOpenScheduled,
+  aiThinking, aiError, onRetryAi,
 }: ChatAreaProps) {
   const { profile } = useAuth();
   const { toast } = useToast();
@@ -66,6 +71,7 @@ export default function ChatArea({
   const otherUser = conversation?.participants.find((p) => p.id !== profile?.id);
   const isGroup = conversation?.is_group ?? false;
   const isSelf = conversation?.is_self ?? false;
+  const isAiChat = conversation?.participants.some((p) => p.id === AI_ASSISTANT_ID) ?? false;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -210,9 +216,11 @@ export default function ChatArea({
     .filter(Boolean);
 
   const headerName = isSelf ? 'Message Yourself' : isGroup ? (conversation.name ?? 'Group chat') : (otherUser?.full_name ?? 'Unknown');
-  const headerSub = isSelf ? 'Your private notes space' : typingNames.length > 0
-    ? <span className="text-emerald-500">{typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing...</span>
-    : isGroup ? `${conversation.participants.length} members` : otherUser ? formatLastSeen(otherUser.last_seen) : '';
+  const headerSub = isSelf ? 'Your private notes space'
+    : isAiChat ? (aiThinking ? <span className="text-blue-500">thinking...</span> : 'AI Assistant')
+    : typingNames.length > 0
+      ? <span className="text-emerald-500">{typingNames.join(', ')} {typingNames.length === 1 ? 'is' : 'are'} typing...</span>
+      : isGroup ? `${conversation.participants.length} members` : otherUser ? formatLastSeen(otherUser.last_seen) : '';
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-slate-900 chat-bg relative">
@@ -221,9 +229,21 @@ export default function ChatArea({
         <button onClick={onBack} className="md:hidden p-1.5 -ml-1 text-slate-500 dark:text-slate-300">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <Avatar src={otherUser?.avatar_url} name={headerName} id={otherUser?.id ?? 'x'} size="sm" verified={otherUser?.is_verified} />
+        <div className="relative shrink-0">
+          <Avatar src={otherUser?.avatar_url} name={headerName} id={otherUser?.id ?? 'x'} size="sm" verified={otherUser?.is_verified} />
+          {isAiChat && (
+            <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-gradient-to-br from-violet-500 to-fuchsia-500 rounded-full flex items-center justify-center border-2 border-white dark:border-slate-800">
+              <Sparkles className="w-2.5 h-2.5 text-white" />
+            </span>
+          )}
+        </div>
         <div className="flex-1 min-w-0">
-          <h2 className="font-semibold text-slate-800 dark:text-white truncate">{headerName}</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="font-semibold text-slate-800 dark:text-white truncate">{headerName}</h2>
+            {isAiChat && (
+              <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white text-[10px] font-semibold">AI</span>
+            )}
+          </div>
           <p className="text-xs text-slate-400 truncate">{headerSub}</p>
         </div>
         {conversation.pinned && <Pin className="w-4 h-4 text-slate-400" />}
@@ -318,6 +338,33 @@ export default function ChatArea({
             onForward={onForward}
           />
         ))}
+
+        {/* AI typing indicator */}
+        {aiThinking && (
+          <div className="flex gap-2 justify-start">
+            <Avatar src={otherUser?.avatar_url} name={headerName} id={otherUser?.id ?? 'x'} size="sm" />
+            <div className="px-4 py-3 rounded-2xl rounded-bl-sm bg-white dark:bg-slate-700 shadow-sm border border-slate-100 dark:border-slate-600">
+              <div className="flex gap-1">
+                <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* AI error with retry */}
+        {aiError && (
+          <div className="flex justify-center">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+              <AlertCircle className="w-4 h-4 text-amber-500 shrink-0" />
+              <span className="text-sm text-amber-700 dark:text-amber-300">{aiError}</span>
+              <button onClick={onRetryAi} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 dark:bg-amber-800/40 text-amber-700 dark:text-amber-200 text-xs font-medium hover:bg-amber-200 dark:hover:bg-amber-800/60 transition">
+                <RotateCcw className="w-3 h-3" /> Retry
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Reply / edit bar */}

@@ -94,18 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         { conversation_id: aiConvo.id, user_id: AI_ASSISTANT_ID },
       ]);
     if (aiPartErr) console.error('Failed to join AI conversation', aiPartErr);
-
-    // Send welcome message from AI
-    const welcomeText = `Welcome to Pulse, ${fullName}! 👋\n\nI'm your official Pulse Assistant. Here are a few things you can do:\n\n• Tap the pencil icon to start a new chat with anyone by their username\n• Send photos, documents, voice notes, and more\n• Try the emoji picker and react to messages\n• Check out Settings to customize your theme, privacy, and notifications\n• Use "Message Yourself" to save notes, links, and reminders\n• Explore Chat Tools for polls, events, and shared to-do lists\n• Generate your QR code to share your profile instantly\n\nFeel free to message me anytime — I'll share tips, updates, and privacy advice. Enjoy chatting! 🚀`;
-
-    const { error: msgErr } = await supabase
-      .from('messages')
-      .insert({
-        conversation_id: aiConvo.id,
-        sender_id: AI_ASSISTANT_ID,
-        text: welcomeText,
-      });
-    if (msgErr) console.error('Failed to send welcome message', msgErr);
   };
 
   const signIn = async (email: string, password: string) => {
